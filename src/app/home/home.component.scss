@@ -1,0 +1,33 @@
+main {
+    margin: 0;
+    padding: 5px;
+    background-color: lightgray;
+  }
+  
+  main > h1, p, .browser {
+    margin: 10px;
+    padding: 5px;
+  }
+  
+  .browser {
+    background: white;
+  }
+  
+  .browser > h2, p {
+    margin: 4px;
+    font-size: 90%;
+  }
+
+
+
+  .card{
+    margin: 20px;
+  }
+
+  .container{
+    display: flex;
+    flex-wrap: wrap;
+    flex-direction: row;
+    justify-content: space-between;
+    margin: 50px 50px 50px 50px; 
+  }
