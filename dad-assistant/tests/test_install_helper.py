@@ -69,6 +69,20 @@ class InstallHelperTests(unittest.TestCase):
         self.assertEqual(cfg["anthropic"]["api_key"], "sk-ant-new-key-2")
         self.assertEqual(cfg["email_reports"]["send_to"], "a@example.com")
 
+    def test_deepseek_key_is_detected(self):
+        out = self.run_helper("write-config", self.settings_file(api_key="sk-0123456789abcdef0123456789abcdef"))
+        self.assertEqual(out.returncode, 0, out.stdout)
+        cfg = self.load()
+        self.assertEqual(cfg["provider"], "openai_compatible")
+        self.assertEqual(cfg["openai_compatible"]["api_key"], "sk-0123456789abcdef0123456789abcdef")
+        self.assertEqual(cfg["openai_compatible"]["base_url"], "https://api.deepseek.com/v1")
+        self.assertIn(b"DeepSeek", out.stdout)
+        # Switching back to Claude on a reinstall.
+        self.run_helper("write-config", self.settings_file(api_key="sk-ant-key-123456"))
+        cfg = self.load()
+        self.assertEqual(cfg["provider"], "anthropic")
+        self.assertEqual(cfg["anthropic"]["api_key"], "sk-ant-key-123456")
+
     def test_broken_config_is_kept_aside_and_replaced(self):
         with open(self.config, "w") as f:
             f.write("{ this is not json")
@@ -85,7 +99,7 @@ class InstallHelperTests(unittest.TestCase):
         with io.open(result, "r", encoding="utf-16-le") as f:
             lines = [line for line in f.read().splitlines() if line]
         self.assertEqual(len(lines), 2)
-        self.assertIn("Claude API", lines[0])
+        self.assertIn("DeepSeek", lines[0])
         self.assertTrue(all("؀" <= ch <= "ۿ" for ch in lines[1] if ch.isalpha()), lines[1])
 
     def test_email_errors_are_explained(self):

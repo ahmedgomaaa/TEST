@@ -19,7 +19,7 @@ SetCompressor /SOLID lzma
 
 !define APPNAME "المساعد"
 !define REGNAME "DadHelper"
-!define VERSION "2.0.0"
+!define VERSION "2.1.0"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${REGNAME}"
 !define RESUME_TASK "HelperSetupResume"
 !define RESUME_LINK "كمّل تثبيت المساعد"
@@ -37,7 +37,7 @@ BrandingText " "
 ShowInstDetails show
 ShowUninstDetails show
 
-VIProductVersion "2.0.0.0"
+VIProductVersion "2.1.0.0"
 VIAddVersionKey "ProductName" "Helper (Arabic computer assistant)"
 VIAddVersionKey "FileDescription" "Helper setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
@@ -348,38 +348,38 @@ Function SettingsPage
     ${EndIf}
 
     ${If} $HadConfig == 1
-        ${NSD_CreateLabel} 0 0 100% 20u "المساعد متثبّت قبل كده والإعدادات القديمة محفوظة. سيب أي خانة فاضية عشان تفضل زي ما هي."
+        ${NSD_CreateLabel} 0 0 100% 18u "المساعد متثبّت قبل كده والإعدادات القديمة محفوظة. سيب أي خانة فاضية عشان تفضل زي ما هي."
     ${Else}
-        ${NSD_CreateLabel} 0 0 100% 20u "اكتب البيانات دي (أحمد عنده المفتاح وباسورد الإيميل). تقدر تغيّرها بعدين بتشغيل البرنامج ده تاني."
+        ${NSD_CreateLabel} 0 0 100% 18u "اكتب البيانات دي (أحمد عنده المفتاح وباسورد الإيميل). تقدر تغيّرها بعدين بتشغيل البرنامج ده تاني."
     ${EndIf}
     Pop $0
 
-    ${NSD_CreateLabel} 62% 24u 38% 12u "اسم الوالد:"
+    ${NSD_CreateLabel} 62% 22u 38% 12u "اسم الوالد:"
     Pop $0
-    ${NSD_CreateText} 0 22u 60% 12u $UserName
+    ${NSD_CreateText} 0 20u 60% 12u $UserName
     Pop $hName
 
-    ${NSD_CreateLabel} 62% 42u 38% 12u "مفتاح Claude API:"
+    ${NSD_CreateLabel} 62% 38u 38% 12u "مفتاح Claude أو DeepSeek:"
     Pop $0
-    ${NSD_CreateText} 0 40u 60% 12u $ApiKey
+    ${NSD_CreateText} 0 36u 60% 12u $ApiKey
     Pop $hKey
 
-    ${NSD_CreateLabel} 62% 60u 38% 12u "إيميل أحمد (للتقارير):"
+    ${NSD_CreateLabel} 62% 54u 38% 12u "إيميل أحمد (للتقارير):"
     Pop $0
-    ${NSD_CreateText} 0 58u 60% 12u $MailTo
+    ${NSD_CreateText} 0 52u 60% 12u $MailTo
     Pop $hTo
 
-    ${NSD_CreateLabel} 62% 78u 38% 12u "إيميل Gmail اللي بيبعت:"
+    ${NSD_CreateLabel} 62% 70u 38% 12u "إيميل Gmail اللي بيبعت:"
     Pop $0
-    ${NSD_CreateText} 0 76u 60% 12u $SmtpUser
+    ${NSD_CreateText} 0 68u 60% 12u $SmtpUser
     Pop $hFrom
 
-    ${NSD_CreateLabel} 62% 96u 38% 12u "App Password بتاع Gmail:"
+    ${NSD_CreateLabel} 62% 86u 38% 12u "App Password بتاع Gmail:"
     Pop $0
-    ${NSD_CreatePassword} 0 94u 60% 12u $SmtpPass
+    ${NSD_CreatePassword} 0 84u 60% 12u $SmtpPass
     Pop $hPass
 
-    ${NSD_CreateLabel} 0 114u 100% 28u "المفتاح من console.anthropic.com. الـ App Password من حساب جوجل: الأمان > التحقق بخطوتين > كلمات مرور التطبيقات. لو إيميل الإرسال فاضي هيتبعت من إيميل أحمد نفسه. الإيميل اختياري."
+    ${NSD_CreateLabel} 0 102u 100% 38u "المفتاح من موقع Claude أو موقع DeepSeek، والبرنامج بيعرف نوعه لوحده.$\r$\nالـ App Password من حساب جوجل: الأمان > كلمات مرور التطبيقات.$\r$\nلو إيميل الإرسال فاضي هيتبعت من إيميل أحمد. الإيميل كله اختياري."
     Pop $0
 
     ${NSD_SetFocus} $hName
@@ -409,7 +409,7 @@ Function SettingsLeave
     ${EndIf}
     ${If} $HadConfig == 0
     ${AndIf} $ApiKey == ""
-        MessageBox MB_YESNO|MB_ICONEXCLAMATION "من غير مفتاح Claude API المساعد مش هيقدر يرد على أي حاجة.$\r$\n$\r$\nتكمّل من غيره؟ (تقدر تضيفه بعدين بتشغيل برنامج التثبيت تاني)" /SD IDYES IDYES +2
+        MessageBox MB_YESNO|MB_ICONEXCLAMATION "من غير مفتاح Claude أو DeepSeek المساعد مش هيقدر يرد على أي حاجة.$\r$\n$\r$\nتكمّل من غيره؟ (تقدر تضيفه بعدين بتشغيل برنامج التثبيت تاني)" /SD IDYES IDYES +2
         Abort
     ${EndIf}
 FunctionEnd

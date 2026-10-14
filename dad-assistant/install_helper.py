@@ -29,10 +29,10 @@ EMAIL_FAILED = 2
 INTERNAL_ERROR = 64
 
 AR = {
-    "ai_ok": "• تمام: الاتصال بالذكاء الاصطناعي شغّال.",
-    "ai_no_key": "• مشكلة: مفتاح Claude API مش مكتوب. المساعد مش هيقدر يرد لحد ما يتكتب.",
-    "ai_bad_key": "• مشكلة: مفتاح Claude API غلط أو متوقف. اتأكد منه في console.anthropic.com.",
-    "ai_credit": "• مشكلة: رصيد حساب Claude خلص. اشحن الرصيد من console.anthropic.com.",
+    "ai_ok": "• تمام: الاتصال بالذكاء الاصطناعي ({name}) شغّال.",
+    "ai_no_key": "• مشكلة: مفتاح الذكاء الاصطناعي (Claude أو DeepSeek) مش مكتوب. المساعد مش هيقدر يرد لحد ما يتكتب.",
+    "ai_bad_key": "• مشكلة: مفتاح {name} غلط أو متوقف. اتأكد منه في {site}.",
+    "ai_credit": "• مشكلة: رصيد حساب {name} خلص. اشحن الرصيد من {site}.",
     "ai_offline": "• مشكلة: مقدرتش أوصل للإنترنت. اتأكد إن الكمبيوتر متوصل وجرّب تاني.",
     "ai_clock": "• مشكلة: تاريخ أو ساعة الكمبيوتر غلط، فالاتصال الآمن مش شغّال. صلّح التاريخ والساعة.",
     "ai_http": "• مشكلة: خدمة الذكاء الاصطناعي ردّت بخطأ رقم {code}.",
@@ -82,7 +82,6 @@ def cmd_check_python(_args):
 FIELDS = {
     # key in the installer's file -> path in config.json
     "user_name": ("user_name",),
-    "api_key": ("anthropic", "api_key"),
     "send_to": ("email_reports", "send_to"),
     "smtp_username": ("email_reports", "smtp_username"),
     "smtp_app_password": ("email_reports", "smtp_app_password"),
@@ -128,6 +127,16 @@ def cmd_write_config(args):
             node = node[part]
         node[where[-1]] = value
         changed.append(key)
+    key = values.get("api_key", "")
+    if key:
+        # One box for any key: Claude keys start with sk-ant-, anything else is used with DeepSeek.
+        from helper import config
+        provider = config.detect_provider(key)
+        data["provider"] = provider
+        section = data.get(provider) if isinstance(data.get(provider), dict) else {}
+        section["api_key"] = key
+        data[provider] = section
+        changed.append("api_key (%s)" % ("Claude" if provider == "anthropic" else "DeepSeek"))
     if values.get("smtp_app_password"):
         # Google shows App Passwords in groups of four ("abcd efgh ijkl mnop"); spaces are not part of it.
         data["email_reports"]["smtp_app_password"] = values["smtp_app_password"].replace(" ", "")
@@ -204,8 +213,19 @@ def cmd_arabic_check(_args):
 
 # ------------------------------------------------------------------ test
 
+def provider_names(cfg):
+    """(name, website) of the AI service in use, for the Arabic messages."""
+    if cfg["provider"] == "anthropic":
+        return "Claude", "console.anthropic.com"
+    base = cfg["openai_compatible"].get("base_url") or ""
+    if "deepseek" in base:
+        return "DeepSeek", "platform.deepseek.com"
+    return "AI", base or "?"
+
+
 def test_ai(cfg):
     from helper import llm, net
+    name, site = provider_names(cfg)
     if not cfg[cfg["provider"]].get("api_key"):
         return False, AR["ai_no_key"]
     llm.REQUEST_TIMEOUT = 60
@@ -214,7 +234,7 @@ def test_ai(cfg):
         reply = client.create("Reply with the single word OK.", [], [
             {"role": "user", "content": [{"type": "text", "text": "Test"}]}])
         say("AI replied: %r" % reply.text()[:80])
-        return True, AR["ai_ok"]
+        return True, AR["ai_ok"].format(name=name)
     except llm.ConfigError as e:
         install_log("AI test: config error: %s" % e)
         return False, AR["ai_other"].format(err=e)
@@ -222,9 +242,9 @@ def test_ai(cfg):
         install_log("AI test: HTTP %s: %s" % (e.status, e.body[:2000]))
         body = e.body.lower()
         if e.status in (401, 403):
-            return False, AR["ai_bad_key"]
+            return False, AR["ai_bad_key"].format(name=name, site=site)
         if e.status == 402 or "credit" in body or "billing" in body or "balance" in body:
-            return False, AR["ai_credit"]
+            return False, AR["ai_credit"].format(name=name, site=site)
         return False, AR["ai_http"].format(code=e.status)
     except net.NetworkError as e:
         install_log("AI test: network error: %s" % e)

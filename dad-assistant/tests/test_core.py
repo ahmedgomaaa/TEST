@@ -83,6 +83,36 @@ class ConfigTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp)
 
+    def test_provider_is_detected_from_the_key(self):
+        self.assertEqual(config.detect_provider("sk-ant-api03-abc"), "anthropic")
+        self.assertEqual(config.detect_provider("sk-0123456789abcdef"), "openai_compatible")
+        self.assertIsNone(config.detect_provider("  "))
+
+    def check_provider(self, provider, claude_key, other_key):
+        cfg = config._merge(config.DEFAULTS, {"provider": provider, "anthropic": {"api_key": claude_key},
+                                               "openai_compatible": {"api_key": other_key}})
+        problems = []
+        config._sanitize(cfg, problems)
+        return cfg, problems
+
+    def test_deepseek_key_in_claude_slot_is_moved(self):
+        cfg, problems = self.check_provider("anthropic", "sk-0123456789abcdef", "")
+        self.assertEqual(cfg["provider"], "openai_compatible")
+        self.assertEqual(cfg["openai_compatible"]["api_key"], "sk-0123456789abcdef")
+        self.assertEqual(cfg["anthropic"]["api_key"], "")
+        self.assertEqual(problems, [])
+        self.assertIn("deepseek", cfg["openai_compatible"]["base_url"])
+
+    def test_provider_follows_the_only_key(self):
+        self.assertEqual(self.check_provider("anthropic", "", "sk-ds-key")[0]["provider"], "openai_compatible")
+        self.assertEqual(self.check_provider("openai_compatible", "sk-ant-key", "")[0]["provider"], "anthropic")
+        # Both keys set: the chosen provider is kept.
+        self.assertEqual(self.check_provider("openai_compatible", "sk-ant-key", "sk-ds")[0]["provider"],
+                         "openai_compatible")
+        self.assertEqual(self.check_provider("anthropic", "sk-ant-key", "sk-ds")[0]["provider"], "anthropic")
+        cfg, problems = self.check_provider("anthropic", "", "")
+        self.assertEqual(len(problems), 1)
+
     def test_example_config_is_valid(self):
         cfg, problems = config.load(paths.CONFIG_EXAMPLE_PATH)
         self.assertEqual([p for p in problems if "JSON" in p], [])
