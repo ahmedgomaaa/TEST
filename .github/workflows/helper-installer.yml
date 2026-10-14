@@ -1,0 +1,51 @@
+# Builds dad-assistant/installer/dist/HelperSetup.exe (too big to e-mail or chat: ~43 MB) and publishes it
+# as a GitHub Release asset, so there is a permanent download link.  Also runs the app's tests first.
+name: Build HelperSetup.exe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "dad-assistant/**"
+      - ".github/workflows/helper-installer.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run the tests
+        working-directory: dad-assistant
+        run: python -m unittest discover -s tests
+
+      - name: Install NSIS
+        run: sudo apt-get update && sudo apt-get install -y nsis
+
+      - name: Build the installer
+        run: sh dad-assistant/installer/build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HelperSetup
+          path: dad-assistant/installer/dist/HelperSetup.exe
+
+      - name: Publish as a release download
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: helper-installer-latest
+          name: HelperSetup.exe (latest build)
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body: |
+            One-file Arabic installer for the dad-assistant helper (Windows 7 SP1 or newer).
+            Built from ${{ github.sha }} on branch ${{ github.ref_name }}.
+            Double-click HelperSetup.exe on the laptop; see dad-assistant/README.md.
+          files: dad-assistant/installer/dist/HelperSetup.exe
