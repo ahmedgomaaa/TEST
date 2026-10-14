@@ -19,7 +19,7 @@ SetCompressor /SOLID lzma
 
 !define APPNAME "المساعد"
 !define REGNAME "DadHelper"
-!define VERSION "2.1.0"
+!define VERSION "2.2.0"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${REGNAME}"
 !define RESUME_TASK "HelperSetupResume"
 !define RESUME_LINK "كمّل تثبيت المساعد"
@@ -37,7 +37,7 @@ BrandingText " "
 ShowInstDetails show
 ShowUninstDetails show
 
-VIProductVersion "2.1.0.0"
+VIProductVersion "2.2.0.0"
 VIAddVersionKey "ProductName" "Helper (Arabic computer assistant)"
 VIAddVersionKey "FileDescription" "Helper setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
@@ -441,6 +441,7 @@ Section "Main"
     SetOutPath "$INSTDIR\helper"
     File "..\helper\*.py"
     File "..\helper\cacert.pem"
+    File "..\helper\build_info.json"
     SetOutPath "$INSTDIR"
     ${If} ${Errors}
         ${Fail} "مقدرتش أنسخ ملفات المساعد في $INSTDIR. اتأكد إن في مساحة فاضية على الهارد وجرّب تاني."

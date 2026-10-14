@@ -38,6 +38,11 @@ fetch kb2758857-x64.msu \
     https://catalog.s.download.windowsupdate.com/msdownload/update/software/secu/2012/10/windows6.1-kb2758857-x64_b717b4e2168ab84dda2eb17c71a4a1adee502ba6.msu \
     8c62047ecb6fc0cd0620538fb9ef50fa69aa86a8a4e34988a9929e56f3a1c1f8
 
+# Build number for automatic updates: must grow with every published build (GitHub's run number in CI).
+BUILD="${BUILD_NUMBER:-${GITHUB_RUN_NUMBER:-0}}"
+NOTES="$(git -C "$HERE" log -1 --format=%s 2>/dev/null || true)"
+python3 "$HERE/make_update.py" --build "$BUILD" --commit "${GITHUB_SHA:-$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo local)}" --notes "$NOTES"
+
 makensis -V2 -INPUTCHARSET UTF8 "$HERE/HelperSetup.nsi"
 echo "Built: $HERE/dist/HelperSetup.exe"
 sha256sum "$HERE/dist/HelperSetup.exe"

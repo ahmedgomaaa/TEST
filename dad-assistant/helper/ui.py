@@ -14,7 +14,7 @@ import traceback
 from tkinter import scrolledtext
 
 from . import agent as agent_mod
-from . import llm, textutil, tools, winapi
+from . import llm, textbox, textutil, tools, winapi
 from . import strings as S
 
 log = logging.getLogger("assistant.ui")
@@ -160,13 +160,12 @@ class App(object):
                                   fg="white", activebackground="#256628", activeforeground="white", padx=24,
                                   command=self._send)
         self.send_btn.pack(side="left", fill="y", padx=(0, 10))
-        self.entry = tk.Text(bottom, height=3, width=20, wrap="word", font=(FONT, s + 1), relief="solid", bd=1,
-                             undo=True)
-        self.entry.tag_configure("rtl", justify="right")
+        # A real Windows text box: Arabic typing, caret and clicks behave like in Notepad.
+        self.entry = textbox.make(bottom, (FONT, s + 1), on_enter=self._send)
         self.entry.pack(side="right", fill="both", expand=True)
-        self.entry.bind("<Return>", self._on_enter)
-        self.entry.bind("<KP_Enter>", self._on_enter)
-        self.entry.bind("<KeyRelease>", lambda e: self.entry.tag_add("rtl", "1.0", "end"))
+        # When the window comes back to the front, typing should go straight into the box again.
+        self.root.bind("<FocusIn>", lambda e: self.root.after_idle(self.entry.focus) if e.widget is self.root
+                       else None)
 
         row = tk.Frame(self.root, bg=BG)
         row.pack(fill="x", padx=16, pady=(0, 12))
@@ -178,7 +177,7 @@ class App(object):
         tk.Button(row, text=textutil.rtl(S.UNDO), font=(FONT, s), padx=12, command=self._undo).pack(side="right")
         tk.Button(row, text=textutil.rtl(S.ASK_AHMED), font=(FONT, s), padx=12,
                   command=self._help).pack(side="left")
-        self.entry.focus_set()
+        self.root.after(200, self.entry.focus)
 
     def _style_tags(self):
         s = self.size
@@ -198,9 +197,8 @@ class App(object):
     def _zoom(self, delta):
         self.size = max(10, min(30, self.size + delta))
         self._style_tags()
-        self.entry.configure(font=(FONT, self.size + 1))
+        self.entry.set_font((FONT, self.size + 1))
         self.status.configure(font=(FONT, self.size - 1, "italic"))
-        self.entry.tag_configure("rtl", justify="right")
 
     # ------------------------------------------------------------------ chat output
 
@@ -263,14 +261,8 @@ class App(object):
 
     # ------------------------------------------------------------------ input
 
-    def _on_enter(self, event):
-        if event.state & 0x0001:  # Shift+Enter makes a new line
-            return None
-        self._send()
-        return "break"
-
     def _send(self):
-        text = self.entry.get("1.0", "end").strip()
+        text = self.entry.get()
         if not text:
             return
         if self.busy:
@@ -279,9 +271,9 @@ class App(object):
         if self.agent is None:
             self._write(text, "user", S.YOU)
             self._write(S.NOT_SET_UP_SHORT, "error")
-            self.entry.delete("1.0", "end")
+            self.entry.clear()
             return
-        self.entry.delete("1.0", "end")
+        self.entry.clear()
         self._write(text, "user", S.YOU)
         self._set_busy(True)
         self.cancel = threading.Event()
@@ -369,13 +361,14 @@ class App(object):
         measure = tkfont.Font(root=self.root, font=pfont).measure
         tk.Label(win, text="\n".join(textutil.rtl_visual_lines(S.HELP_PROMPT, 540, measure)), font=pfont, bg=BG,
                  justify="right").pack(padx=20, pady=(18, 8), anchor="e")
-        box = tk.Text(win, height=5, width=50, wrap="word", font=(FONT, s))
-        box.tag_configure("rtl", justify="right")
-        box.bind("<KeyRelease>", lambda e: box.tag_add("rtl", "1.0", "end"))
-        box.pack(padx=20, fill="both", expand=True)
+        holder = tk.Frame(win, bg=BG, width=560, height=150)
+        holder.pack(padx=20, fill="both", expand=True)
+        holder.pack_propagate(False)
+        box = textbox.make(holder, (FONT, s), height=4)
+        box.pack(fill="both", expand=True)
 
         def send():
-            note = box.get("1.0", "end").strip()
+            note = box.get()
             win.destroy()
             if not self.reporter.configured():
                 self._write(S.HELP_NOT_CONFIGURED, "error")
@@ -391,7 +384,7 @@ class App(object):
         tk.Button(row, text=textutil.rtl(S.CANCEL), font=(FONT, s + 2), padx=20,
                   command=win.destroy).pack(side="right", padx=12)
         _center(win, self.root)
-        box.focus_set()
+        win.after(200, box.focus)
         try:
             win.grab_set()
         except tk.TclError:
@@ -416,6 +409,10 @@ class App(object):
         return holder["answer"]
 
     def _poll(self):
+        try:
+            self.entry.poll()  # Enter in the Windows text box
+        except Exception:
+            log.exception("Text box poll failed")
         try:
             while True:
                 kind, value = self.events.get_nowait()
@@ -449,7 +446,7 @@ class App(object):
                 done.set()
         elif kind == "done":
             self._set_busy(False)
-            self.entry.focus_set()
+            self.entry.focus()
 
     # ------------------------------------------------------------------ errors and closing
 

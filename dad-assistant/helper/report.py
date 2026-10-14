@@ -42,6 +42,7 @@ class Reporter(object):
         self.settings = cfg["email_reports"]
         self.assistant_name = cfg["assistant_name"]
         self._lock = threading.Lock()
+        self._errors_lock = threading.Lock()
         self._last_error_report = 0.0
         self._pending_errors = []
 
@@ -129,7 +130,7 @@ class Reporter(object):
         """Automatic error report, throttled so a broken setting cannot flood the inbox."""
         if not self.settings.get("send_on_errors", True):
             return
-        with self._lock:
+        with self._errors_lock:  # not self._lock: that one is held while an e-mail is being sent
             self._pending_errors.append("%s  %s\n%s" % (time.strftime("%H:%M:%S"), summary, details))
             if time.time() - self._last_error_report < ERROR_REPORT_MIN_INTERVAL:
                 return

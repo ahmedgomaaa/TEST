@@ -50,6 +50,10 @@ DEFAULTS = {
         "command_timeout_seconds": 120,
     },
     "max_steps_per_request": 30,
+    "updates": {
+        "enabled": True,
+        "manifest_url": "https://github.com/ahmedgomaaa/TEST/releases/download/helper-installer-latest/update.json",
+    },
 }
 
 

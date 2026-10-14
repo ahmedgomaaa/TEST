@@ -146,6 +146,20 @@ class TextTests(unittest.TestCase):
         with mock.patch.object(textutil, "REORDER", False):
             self.assertEqual(textutil.rtl(arabic), arabic)
 
+    def test_rtl_display_puts_edges_and_english_in_rtl_order(self):
+        with mock.patch.object(textutil, "REORDER", False):
+            d = textutil.rtl_display
+            ar = "\u062d\u0627\u062c\u0629"           # an Arabic word
+            ar2 = "\u0645\u0646 \u0641\u0636\u0644\u0643"  # two Arabic words
+            self.assertEqual(d(ar + "."), "." + ar)                 # full stop goes to the left end
+            self.assertEqual(d("(" + ar + ")."), ".(" + ar + ")")   # brackets mirrored at the ends
+            self.assertEqual(d(ar + " Google Chrome " + ar2), ar2 + " Google Chrome " + ar)
+            self.assertEqual(d("2. " + ar + "\u061f"), "2. " + ar + "\u061f")  # numbers and Arabic ? stay
+            self.assertEqual(d("Hello world."), "Hello world.")      # English is left alone
+            self.assertEqual(d(ar + "\u064b"), ar + "\u064b")      # tanween is part of the word
+            self.assertTrue(textutil.is_rtl(ar + " Google Chrome"))
+            self.assertFalse(textutil.is_rtl("Google Chrome " + ar))
+
     def test_strings_are_safe_for_tk(self):
         """Tk 8.6.9 crashes on characters above U+FFFF (emoji), so Dad's texts must not contain any."""
         for name in dir(S):
@@ -483,6 +497,29 @@ class ReportTests(unittest.TestCase):
     def tearDown(self):
         self.patch.stop()
         shutil.rmtree(self.outbox, ignore_errors=True)
+
+    def test_error_report_does_not_wait_for_a_slow_email(self):
+        """While an e-mail is being sent (up to 40 s when offline), reporting an error must not block
+        the caller: it is the AI thread, and Dad would wait for the answer."""
+        reporter = report.Reporter(self.cfg)
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_send(msg):
+            started.set()
+            release.wait(10)
+            raise OSError("offline")
+        with mock.patch.object(reporter, "_smtp_send", side_effect=slow_send), \
+                mock.patch.object(reporter, "_save_to_outbox"):
+            reporter.send_async("first", "body", attach_log=False)
+            self.assertTrue(started.wait(5))
+            t0 = time.time()
+            reporter.report_error("Something failed", "details")
+            self.assertLess(time.time() - t0, 1.0)
+            release.set()
+            for t in threading.enumerate():  # let the background send finish while the patches are active
+                if t.name == "report":
+                    t.join(10)
 
     def test_redacted_and_queued_when_offline(self):
         r = report.Reporter(self.cfg)

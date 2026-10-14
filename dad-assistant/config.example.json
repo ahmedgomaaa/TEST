@@ -47,5 +47,11 @@
     "command_timeout_seconds": 120
   },
 
-  "max_steps_per_request": 30
+  "max_steps_per_request": 30,
+
+  "_updates_help": "At every start the helper checks this file on GitHub and installs newer versions by itself (settings are kept). Set enabled to false to stop that.",
+  "updates": {
+    "enabled": true,
+    "manifest_url": "https://github.com/ahmedgomaaa/TEST/releases/download/helper-installer-latest/update.json"
+  }
 }

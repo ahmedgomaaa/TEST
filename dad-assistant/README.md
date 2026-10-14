@@ -13,6 +13,8 @@ Everything is in Arabic and laid out right to left. The AI answers in simple Egy
 - **اطلب مساعدة أحمد** (Ask Ahmed for help) e-mails you his note plus the log file.
 - **A+ / A-** change the text size.
 - Before any change, a big question appears, for example "هحط الـ 34 صورة في فولدر جديد اسمه صور", with **أيوه، كمّل** (Yes, go ahead) and **لأ** (No) buttons.
+- The typing box is a real Windows text box set to right-to-left, the same one Notepad uses. Arabic typing, the caret, selection, Backspace and mouse clicks behave as he expects. Tk's own box drew the caret on the wrong side, so letters landed in the wrong place. Ctrl+A selects everything.
+- Chat lines are arranged for right-to-left reading. Punctuation at the ends and English words (for example "Google Chrome") are placed where an Arabic reader expects them, because Tk can only draw left-to-right lines.
 - Messages for you (e-mail reports, logs) stay in English. All of Dad's texts are in `helper/strings.py`, so wording can be changed in one place.
 
 ## Installing: one file, `HelperSetup.exe`
@@ -30,6 +32,25 @@ Copy `HelperSetup.exe` to the laptop and double-click it. It asks for administra
 Every step is logged to `%TEMP%\HelperSetup.log`, which is copied to `data\logs\setup.log` next to the app. Every failure shows a short Arabic message and where the log is. The app goes to `%LOCALAPPDATA%\Programs\Helper`.
 
 **Running it again is safe.** It keeps `config.json` and `data\`, reuses Python, and asks you to close the helper first if it is open. That's also how you change the API key or e-mail later. **Uninstalling** asks whether to keep the settings and logs (default: keep) and leaves Python installed.
+
+## Automatic updates (fix things remotely)
+
+Every time the helper starts, the launcher checks `update.json` in the GitHub release `helper-installer-latest` (8-second limit; offline means it just starts). If the build number there is higher than its own, it:
+
+1. shows a small "بحدّث المساعد..." (updating) window,
+2. downloads `helper-app.zip` (about 230 KB: the app's own files only),
+3. checks its size and SHA-256, refuses any file outside the app's own files, and compiles every `.py` file,
+4. swaps the files, keeping the old version in `data\update\backup`. If the swap fails half-way, the old version is put back at once.
+
+`config.json` and `data\` are never touched. The chat then says "(المساعد اتحدّث لنسخة جديدة رقم N.)" (updated to build N), and you get an e-mail "Updated to build N".
+
+**If the new version crashes twice right after updating**, the launcher automatically puts the previous version back and remembers that build as bad, so it isn't downloaded again. Dad sees a calm note, and you get an e-mail "Update to build N failed, rolled back". To fix it, push a newer build.
+
+**How to send Dad a fix:** commit and push to `ccr-2106592e-sihkos` (or the default branch). The GitHub workflow runs the tests, builds `HelperSetup.exe`, `helper-app.zip` and `update.json` with build number = the workflow's run number, and publishes them. The next time Dad opens the helper, he has the fix. Pushes to other branches build and test but don't publish.
+
+What an update can't change: Python itself and Windows updates. Those still need `HelperSetup.exe`, which is safe to run again. To turn updates off, set `"updates": {"enabled": false}` in `config.json`.
+
+**Trust:** updates come only from this repository's release, over HTTPS checked against the bundled certificates. Anyone who can push to the repository can therefore run code on Dad's laptop, so protect the GitHub account with two-factor authentication.
 
 ### Building `HelperSetup.exe`
 

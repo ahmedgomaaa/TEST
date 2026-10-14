@@ -71,6 +71,37 @@ class FakeAPI(object):
         self.server.server_close()
 
 
+class FakeFiles(object):
+    """Serves fixed files over HTTPS, like GitHub's release downloads.  `files` maps path -> bytes."""
+
+    def __init__(self, files=None):
+        self.files = dict(files or {})
+        self.requests = []
+        fake = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                fake.requests.append(self.path)
+                data = fake.files.get(self.path)
+                self.send_response(200 if data is not None else 404)
+                data = data if data is not None else b"Not Found"
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        self.server = _ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.socket = server_ssl_context().wrap_socket(self.server.socket, server_side=True)
+        self.url = "https://localhost:%d" % self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
 def text_reply(text):
     return 200, {"content": [{"type": "text", "text": text}], "stop_reason": "end_turn"}
 

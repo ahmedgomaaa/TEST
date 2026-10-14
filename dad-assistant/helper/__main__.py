@@ -17,6 +17,24 @@ def _crash_tail(path, max_chars=4000):
         return "(none)"
 
 
+def _tell_about_update(app, reporter, notice):
+    """Show "updated" / "rolled back" in the chat and e-mail Ahmed."""
+    if not notice:
+        return
+    from . import strings
+    try:
+        if notice.get("kind") == "updated":
+            app._write(strings.UPDATED.format(build=notice.get("to")), "notice")
+            reporter.send_async("Updated to build %s" % notice.get("to"),
+                                "The helper updated itself from build %s to build %s (commit %s).\n\n%s"
+                                % (notice.get("from"), notice.get("to"), notice.get("commit"),
+                                   notice.get("notes") or ""), attach_log=False)
+        elif notice.get("kind") == "rolled_back":
+            app._write(strings.ROLLED_BACK, "notice")
+    except Exception:
+        logging.getLogger("assistant").exception("Could not show the update notice")
+
+
 def main():
     from . import config, logs, paths, report, winapi
 
@@ -71,8 +89,11 @@ def main():
         pass
     reporter.start_outbox_worker()
 
-    from . import ui
+    from . import ui, updater
     app = ui.App(cfg, problems, reporter)
+    # The window is up: an update just installed works, so it will not be rolled back.
+    updater.confirm_started()
+    _tell_about_update(app, reporter, updater.take_notice())
     app.run()
 
     try:
