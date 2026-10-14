@@ -11,7 +11,7 @@ import time
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, APP_DIR)
 
-from helper import logs, paths, winapi  # noqa: E402
+from helper import logs, paths, strings, winapi  # noqa: E402
 
 
 def main():
@@ -20,7 +20,7 @@ def main():
     import logging
     log = logging.getLogger("assistant.launcher")
     if not winapi.single_instance("HomeAssistantLauncher"):
-        winapi.message_box("The helper is already open. Look for it at the bottom of the screen.", "Helper")
+        winapi.message_box(strings.ALREADY_OPEN, strings.DEFAULT_ASSISTANT_NAME)
         return
     crashes = []
     while True:
@@ -51,10 +51,7 @@ def main():
                                               "It crashed 3 times in a row (last exit code %s)." % code)
             except Exception:
                 log.exception("Could not send the crash report")
-            winapi.message_box(
-                "Sorry, the helper has a problem and cannot start right now.\n\n"
-                "Ahmed will get a report about it automatically. Please try again later.",
-                "Helper")
+            winapi.message_box(strings.CANNOT_START, strings.DEFAULT_ASSISTANT_NAME)
             return
         time.sleep(2)
 

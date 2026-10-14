@@ -15,6 +15,7 @@ from tkinter import scrolledtext
 
 from . import agent as agent_mod
 from . import llm, textutil, tools, winapi
+from . import strings as S
 
 log = logging.getLogger("assistant.ui")
 
@@ -25,7 +26,7 @@ ASSISTANT_COLOR = "#1E1E1E"
 NOTICE_COLOR = "#6B6B6B"
 ERROR_COLOR = "#A61B1B"
 GREEN = "#2E7D32"
-FONT = "Segoe UI"
+FONT = "Tahoma"  # clear Arabic letters on every Windows 7 laptop
 
 
 def _center(win, root):
@@ -39,10 +40,10 @@ def _center(win, root):
 class BigDialog(object):
     """A modal Yes/No (or OK) question with very large buttons."""
 
-    def __init__(self, root, size, question, details=None, yes="Yes, go ahead", no="No"):
+    def __init__(self, root, size, question, details=None, yes=S.YES_GO_AHEAD, no=S.NO):
         self.result = False
         win = self.win = tk.Toplevel(root)
-        win.title("Please choose")
+        win.title(S.PLEASE_CHOOSE)
         win.configure(bg=BG)
         win.transient(root)
         win.resizable(False, False)
@@ -63,16 +64,18 @@ class BigDialog(object):
                 d = textutil.for_tk(d)
                 shown.extend(textutil.rtl_visual_lines(d, 620, dfont.measure) if textutil.is_rtl(d) else [d])
             if len(details) > 12:
-                shown.append("... and %d more" % (len(details) - 12))
+                shown.append(textutil.rtl(S.AND_MORE.format(n=len(details) - 12)))
             tk.Label(win, text="\n".join(shown), font=(FONT, size - 3), bg=BG, fg="#444444", wraplength=640,
-                     justify="left").pack(padx=24, pady=(0, 12), anchor="w")
+                     justify="right").pack(padx=24, pady=(0, 12), anchor="e")
+        # Right to left: the first choice ("Yes") is on the right.
         row = tk.Frame(win, bg=BG)
         row.pack(padx=24, pady=(6, 22), fill="x")
-        tk.Button(row, text=yes, font=(FONT, size + 2, "bold"), bg=GREEN, fg="white", activebackground="#256628",
-                  activeforeground="white", padx=26, pady=10, command=self._yes).pack(side="left")
+        tk.Button(row, text=textutil.rtl(yes), font=(FONT, size + 2, "bold"), bg=GREEN, fg="white",
+                  activebackground="#256628", activeforeground="white", padx=26, pady=10,
+                  command=self._yes).pack(side="right")
         if no:
-            tk.Button(row, text=no, font=(FONT, size + 2, "bold"), padx=26, pady=10,
-                      command=self._no).pack(side="left", padx=(16, 0))
+            tk.Button(row, text=textutil.rtl(no), font=(FONT, size + 2, "bold"), padx=26, pady=10,
+                      command=self._no).pack(side="right", padx=(0, 16))
         _center(win, root)
         win.lift()
         win.focus_force()
@@ -99,6 +102,8 @@ class App(object):
         self.cfg = cfg
         self.reporter = reporter
         self.size = cfg["font_size"]
+        textutil.REORDER = bool(cfg.get("arabic_word_order_fix", False))
+        self._status_text = ""
         self.events = queue.Queue()
         self.cancel = threading.Event()
         self.busy = False
@@ -130,11 +135,14 @@ class App(object):
 
     def _build(self):
         s = self.size
+        # Everything is laid out right to left, like an Arabic page.
         top = tk.Frame(self.root, bg=BG)
         top.pack(fill="x", padx=16, pady=(12, 4))
-        tk.Label(top, text=self.cfg["assistant_name"], font=(FONT, s + 8, "bold"), bg=BG).pack(side="left")
-        tk.Button(top, text="Text size  A-", font=(FONT, s - 2), command=lambda: self._zoom(-1)).pack(side="right")
-        tk.Button(top, text="A+", font=(FONT, s - 2), command=lambda: self._zoom(1)).pack(side="right", padx=4)
+        tk.Label(top, text=textutil.rtl(self.cfg["assistant_name"]), font=(FONT, s + 8, "bold"),
+                 bg=BG).pack(side="right")
+        tk.Button(top, text="A-", font=(FONT, s - 2), command=lambda: self._zoom(-1)).pack(side="left")
+        tk.Button(top, text="A+", font=(FONT, s - 2), command=lambda: self._zoom(1)).pack(side="left", padx=4)
+        tk.Label(top, text=textutil.rtl(S.TEXT_SIZE), font=(FONT, s - 2), bg=BG).pack(side="left", padx=4)
 
         self.chat = scrolledtext.ScrolledText(self.root, wrap="word", font=(FONT, s), bg=CHAT_BG, relief="flat",
                                               padx=14, pady=10, state="disabled", cursor="arrow", height=10,
@@ -142,31 +150,34 @@ class App(object):
         self.chat.pack(fill="both", expand=True, padx=16, pady=6)
         self._style_tags()
 
-        self.status = tk.Label(self.root, text="", font=(FONT, s - 1, "italic"), fg=NOTICE_COLOR, bg=BG, anchor="w")
+        self.status = tk.Label(self.root, text="", font=(FONT, s - 1, "italic"), fg=NOTICE_COLOR, bg=BG, anchor="e")
         self.status.pack(fill="x", padx=18)
 
         bottom = tk.Frame(self.root, bg=BG)
         bottom.pack(fill="x", padx=16, pady=(4, 6))
         # Pack the button first so the text box can never squeeze it off the screen.
-        self.send_btn = tk.Button(bottom, text="Send", font=(FONT, s + 4, "bold"), bg=GREEN, fg="white",
-                                  activebackground="#256628", activeforeground="white", padx=24,
+        self.send_btn = tk.Button(bottom, text=textutil.rtl(S.SEND), font=(FONT, s + 4, "bold"), bg=GREEN,
+                                  fg="white", activebackground="#256628", activeforeground="white", padx=24,
                                   command=self._send)
-        self.send_btn.pack(side="right", fill="y", padx=(10, 0))
+        self.send_btn.pack(side="left", fill="y", padx=(0, 10))
         self.entry = tk.Text(bottom, height=3, width=20, wrap="word", font=(FONT, s + 1), relief="solid", bd=1,
                              undo=True)
-        self.entry.pack(side="left", fill="both", expand=True)
+        self.entry.tag_configure("rtl", justify="right")
+        self.entry.pack(side="right", fill="both", expand=True)
         self.entry.bind("<Return>", self._on_enter)
         self.entry.bind("<KP_Enter>", self._on_enter)
+        self.entry.bind("<KeyRelease>", lambda e: self.entry.tag_add("rtl", "1.0", "end"))
 
         row = tk.Frame(self.root, bg=BG)
         row.pack(fill="x", padx=16, pady=(0, 12))
-        self.stop_btn = tk.Button(row, text="Stop", font=(FONT, s), padx=12, state="disabled", command=self._stop)
-        self.stop_btn.pack(side="left")
-        tk.Button(row, text="New conversation", font=(FONT, s), padx=12,
-                  command=self._new_conversation).pack(side="left", padx=8)
-        tk.Button(row, text="Undo last change", font=(FONT, s), padx=12, command=self._undo).pack(side="left")
-        tk.Button(row, text="Ask Ahmed for help", font=(FONT, s), padx=12,
-                  command=self._help).pack(side="right")
+        self.stop_btn = tk.Button(row, text=textutil.rtl(S.STOP), font=(FONT, s), padx=12, state="disabled",
+                                  command=self._stop)
+        self.stop_btn.pack(side="right")
+        tk.Button(row, text=textutil.rtl(S.NEW_CONVERSATION), font=(FONT, s), padx=12,
+                  command=self._new_conversation).pack(side="right", padx=8)
+        tk.Button(row, text=textutil.rtl(S.UNDO), font=(FONT, s), padx=12, command=self._undo).pack(side="right")
+        tk.Button(row, text=textutil.rtl(S.ASK_AHMED), font=(FONT, s), padx=12,
+                  command=self._help).pack(side="left")
         self.entry.focus_set()
 
     def _style_tags(self):
@@ -189,6 +200,7 @@ class App(object):
         self._style_tags()
         self.entry.configure(font=(FONT, self.size + 1))
         self.status.configure(font=(FONT, self.size - 1, "italic"))
+        self.entry.tag_configure("rtl", justify="right")
 
     # ------------------------------------------------------------------ chat output
 
@@ -197,7 +209,10 @@ class App(object):
         self.chat.configure(state="normal")
         try:
             if who:
-                self.chat.insert("end", "\n%s\n" % who, "who_" + tag)
+                if textutil.is_rtl(who):
+                    self.chat.insert("end", "\n%s\n" % textutil.rtl(who), ("who_" + tag, "rtl"))
+                else:
+                    self.chat.insert("end", "\n%s\n" % who, "who_" + tag)
             for paragraph in text.split("\n"):
                 if textutil.is_rtl(paragraph):
                     for line in self._rtl_lines(paragraph, tag):
@@ -209,8 +224,6 @@ class App(object):
         self.chat.see("end")
 
     def _rtl_lines(self, paragraph, tag):
-        if not self.cfg.get("arabic_word_order_fix", True):
-            return [paragraph]
         try:
             font = tkfont.Font(root=self.root, font=self.chat.tag_cget(tag, "font") or self.chat.cget("font"))
             width = max(200, self.chat.winfo_width() - 60)
@@ -242,14 +255,11 @@ class App(object):
 
     def _greet(self, problems):
         name = self.cfg["user_name"]
-        hello = "Hello%s! I'm %s, your computer helper." % (" " + name if name else "", self.cfg["assistant_name"])
-        self._write(hello + "\nType what you need in the box at the bottom and press Send (or the Enter key).\n"
-                    "For example: \"Tidy up my desktop\", \"Find my photos from last summer\" or \"What is "
-                    "the weather like in spring in Cairo?\"", "assistant", self.cfg["assistant_name"])
+        hello = S.GREETING.format(name=S.GREETING_NAME.format(name=name) if name else "", assistant=self.cfg["assistant_name"])
+        self._write(hello + "\n" + S.GREETING_HOW, "assistant", self.cfg["assistant_name"])
         if problems or self.agent is None:
-            told = ("Ahmed has been sent a message about it." if self.reporter.configured()
-                    else "Please ask Ahmed to finish setting me up.")
-            self._write("I am not completely set up yet, so I may not be able to answer. " + told, "error")
+            told = S.AHMED_WAS_TOLD if self.reporter.configured() else S.TELL_AHMED_TO_FINISH
+            self._write(S.NOT_SET_UP + " " + told, "error")
 
     # ------------------------------------------------------------------ input
 
@@ -264,15 +274,15 @@ class App(object):
         if not text:
             return
         if self.busy:
-            self.status.configure(text="Please wait, I'm still working on the last request (or press Stop).")
+            self._set_status(S.STATUS_WAIT_LAST)
             return
         if self.agent is None:
-            self._write(text, "user", "You")
-            self._write("Sorry, I am not set up yet. Please use \"Ask Ahmed for help\".", "error")
+            self._write(text, "user", S.YOU)
+            self._write(S.NOT_SET_UP_SHORT, "error")
             self.entry.delete("1.0", "end")
             return
         self.entry.delete("1.0", "end")
-        self._write(text, "user", "You")
+        self._write(text, "user", S.YOU)
         self._set_busy(True)
         self.cancel = threading.Event()
         threading.Thread(target=self._worker, args=(text, self.cancel), name="agent", daemon=True).start()
@@ -283,24 +293,29 @@ class App(object):
             self.agent.handle(text, cancel)
         except Exception:
             log.exception("Worker crashed")
-            self._emit("error", "Sorry, something went wrong. Please try again.")
+            self._emit("error", S.SOMETHING_WRONG)
         finally:
             self.events.put(("done", None))
+
+    def _set_status(self, text):
+        """Show a status line; while busy, _poll adds moving dots at its end."""
+        self._status_text = (text or "").rstrip(". ")
+        self.status.configure(text=textutil.rtl(self._status_text))
 
     def _set_busy(self, busy):
         self.busy = busy
         self.send_btn.configure(state="disabled" if busy else "normal")
         self.stop_btn.configure(state="normal" if busy else "disabled")
-        self.status.configure(text="Thinking..." if busy else "")
+        self._set_status(S.STATUS_THINKING if busy else "")
         self._busy_since = time.time()
 
     def _stop(self):
         self.cancel.set()
-        self.status.configure(text="Stopping...")
+        self._set_status(S.STATUS_STOPPING)
 
     def _new_conversation(self):
         if self.busy:
-            self.status.configure(text="Please press Stop first.")
+            self._set_status(S.STATUS_PRESS_STOP_FIRST)
             return
         if self.agent is not None:
             self.agent.new_conversation()
@@ -311,21 +326,31 @@ class App(object):
 
     def _undo(self):
         if self.busy:
-            self.status.configure(text="Please wait until I have finished.")
+            self._set_status(S.STATUS_WAIT_FINISH)
             return
         batch = self.runner.undo.peek()
         if not batch:
-            BigDialog(self.root, self.size, "There is nothing to undo.", yes="OK", no=None).wait()
+            BigDialog(self.root, self.size, S.NOTHING_TO_UNDO, yes=S.OK, no=None).wait()
             return
         self.cancel = threading.Event()
         self._set_busy(True)
-        self.status.configure(text="Undoing...")
+        self._set_status(S.STATUS_UNDOING)
 
         def work():
             try:
                 winapi_init_com()
+                self.runner.last_undo = None
                 result, _err = self.runner.run("undo_last_change", {})
-                self._emit("notice", result)
+                outcome = self.runner.last_undo
+                if outcome is None:
+                    self._emit("notice", S.UNDO_CANCELLED if result.startswith("The user said NO")
+                               else S.SOMETHING_WRONG)
+                else:
+                    restored, problems = outcome
+                    text = S.UNDO_DONE.format(n=restored)
+                    if problems:
+                        text += " " + S.UNDO_SOME_PROBLEMS.format(n=len(problems))
+                    self._emit("notice", text)
                 if self.agent is not None and not result.startswith("The user said NO"):
                     # Let the model know, so it does not get confused later.
                     self.agent.messages.append({"role": "user", "content": [
@@ -336,29 +361,35 @@ class App(object):
 
     def _help(self):
         win = tk.Toplevel(self.root)
-        win.title("Ask Ahmed for help")
+        win.title(S.HELP_TITLE)
         win.configure(bg=BG)
         win.transient(self.root)
         s = self.size
-        tk.Label(win, text="Is something not working? Write a short note for Ahmed (you can leave it empty).",
-                 font=(FONT, s + 1, "bold"), bg=BG, wraplength=560, justify="left").pack(padx=20, pady=(18, 8))
+        pfont = (FONT, s + 1, "bold")
+        measure = tkfont.Font(root=self.root, font=pfont).measure
+        tk.Label(win, text="\n".join(textutil.rtl_visual_lines(S.HELP_PROMPT, 540, measure)), font=pfont, bg=BG,
+                 justify="right").pack(padx=20, pady=(18, 8), anchor="e")
         box = tk.Text(win, height=5, width=50, wrap="word", font=(FONT, s))
+        box.tag_configure("rtl", justify="right")
+        box.bind("<KeyRelease>", lambda e: box.tag_add("rtl", "1.0", "end"))
         box.pack(padx=20, fill="both", expand=True)
 
         def send():
             note = box.get("1.0", "end").strip()
             win.destroy()
-            self._write("Sending a message to Ahmed...", "notice")
+            if not self.reporter.configured():
+                self._write(S.HELP_NOT_CONFIGURED, "error")
+                return
+            self._write(S.HELP_SENDING, "notice")
             body = "Dad pressed \"Ask Ahmed for help\".\n\nHis note:\n%s" % (note or "(no note)")
             self.reporter.send_async("Dad asked for help", body, attach_log=True,
-                                     done=lambda ok: self._emit("notice", "Your message was sent to Ahmed."
-                                                                if ok else "I couldn't send it right now; "
-                                                                "I will send it automatically later."))
+                                     done=lambda ok: self._emit("notice", S.HELP_SENT if ok else S.HELP_QUEUED))
         row = tk.Frame(win, bg=BG)
         row.pack(padx=20, pady=16, fill="x")
-        tk.Button(row, text="Send to Ahmed", font=(FONT, s + 2, "bold"), bg=GREEN, fg="white", padx=20,
-                  command=send).pack(side="left")
-        tk.Button(row, text="Cancel", font=(FONT, s + 2), padx=20, command=win.destroy).pack(side="left", padx=12)
+        tk.Button(row, text=textutil.rtl(S.HELP_SEND), font=(FONT, s + 2, "bold"), bg=GREEN, fg="white", padx=20,
+                  command=send).pack(side="right")
+        tk.Button(row, text=textutil.rtl(S.CANCEL), font=(FONT, s + 2), padx=20,
+                  command=win.destroy).pack(side="right", padx=12)
         _center(win, self.root)
         box.focus_set()
         try:
@@ -393,18 +424,16 @@ class App(object):
             pass
         except Exception:
             log.exception("Error while updating the window")
-        if self.busy:
+        if self.busy and self._status_text:
             dots = "." * (1 + int(time.time() * 2) % 3)
-            current = self.status.cget("text").rstrip(".")
-            if current:
-                self.status.configure(text=current + dots)
+            self.status.configure(text=textutil.rtl(self._status_text) + dots)
         self.root.after(100, self._poll)
 
     def _handle_event(self, kind, value):
         if kind == "text":
             self._write(textutil.strip_markdown(value), "assistant", self.cfg["assistant_name"])
         elif kind == "activity":
-            self.status.configure(text=value.rstrip("."))
+            self._set_status(value)
             self._write(value, "activity")
         elif kind == "notice":
             self._write(value, "notice")
@@ -429,7 +458,7 @@ class App(object):
         log.error("Window error:\n%s", details)
         self.reporter.report_error("Window error: %s" % exc, details)
         try:
-            self._write("Sorry, something went wrong. Please try again.", "error")
+            self._write(S.SOMETHING_WRONG, "error")
             if self.busy and not any(t.name in ("agent", "undo") and t.is_alive() for t in threading.enumerate()):
                 self._set_busy(False)
         except Exception:
@@ -437,8 +466,8 @@ class App(object):
 
     def _close(self):
         if self.busy:
-            if not BigDialog(self.root, self.size, "I am still working. Close anyway?", yes="Yes, close",
-                             no="No, keep working").wait():
+            if not BigDialog(self.root, self.size, S.STILL_WORKING_CLOSE, yes=S.YES_CLOSE,
+                             no=S.NO_KEEP_WORKING).wait():
                 return
             self.cancel.set()
         self.root.destroy()

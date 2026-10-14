@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import fakes  # noqa: E402
+from helper import strings as S  # noqa: E402
 from helper import agent, config, llm, logs, net, paths, report, tools  # noqa: E402
 
 PROXY_VARS = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "ALL_PROXY", "all_proxy")
@@ -139,7 +140,7 @@ class ConversationTests(E2EBase):
         start = time.time()
         a.handle("hi", cancel)
         self.assertLess(time.time() - start, 3)
-        self.assertEqual(self.emitted[-1], ("notice", "Stopped."))
+        self.assertEqual(self.emitted[-1], ("notice", S.STOPPED))
         self.assertNotIn(("text", "too late"), self.emitted)
         time.sleep(6)  # the abandoned request finishes in the background...
         self.assertNotIn(("text", "too late"), self.emitted)  # ...and its answer is thrown away
@@ -156,7 +157,7 @@ class ConversationTests(E2EBase):
         a = self.make_agent(self.cfg(server.url))
         a.handle("hi", threading.Event())
         self.assertEqual(self.emitted[-1][0], "error")
-        self.assertIn("account settings", self.emitted[-1][1])
+        self.assertIn(S.ACCOUNT_PROBLEM, self.emitted[-1][1])
         self.assertTrue(self.reports)
 
     def test_out_of_credit(self):
@@ -164,7 +165,7 @@ class ConversationTests(E2EBase):
                                             "message": "Your credit balance is too low to access the API."}})])
         a = self.make_agent(self.cfg(server.url))
         a.handle("hi", threading.Event())
-        self.assertIn("run out of credit", self.emitted[-1][1])
+        self.assertIn(S.NO_CREDIT, self.emitted[-1][1])
         self.assertEqual(len(server.requests), 1)
 
     def test_server_unreachable(self):
@@ -174,7 +175,7 @@ class ConversationTests(E2EBase):
         self.servers.remove(server)
         a = self.make_agent(self.cfg(url))
         a.handle("hi", threading.Event())
-        self.assertIn("internet", self.emitted[-1][1])
+        self.assertIn(S.NO_INTERNET, self.emitted[-1][1])
 
     def test_untrusted_certificate_is_refused(self):
         server = self.api([fakes.text_reply("should never be seen")], tls=True)
@@ -183,7 +184,7 @@ class ConversationTests(E2EBase):
             a = self.make_agent(self.cfg(server.url))
             a.handle("hi", threading.Event())
         self.assertEqual(self.emitted[-1][0], "error")
-        self.assertIn("date and time", self.emitted[-1][1])
+        self.assertIn(S.CHECK_CLOCK, self.emitted[-1][1])
         self.assertEqual(server.requests, [])
 
     def test_openai_compatible_provider(self):

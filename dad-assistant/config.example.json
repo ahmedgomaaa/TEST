@@ -1,11 +1,12 @@
 {
   "_comment": "Copy of the settings. SETUP.bat copies this to config.json. Fill in the keys below. Never share config.json.",
 
-  "assistant_name": "Helper",
+  "_assistant_name_help": "Leave empty to use the default Arabic name.",
+  "assistant_name": "",
   "user_name": "",
   "font_size": 15,
-  "_arabic_help": "Arabic is laid out right-to-left by the app. If Arabic words look reversed on this laptop, set this to false.",
-  "arabic_word_order_fix": true,
+  "_arabic_help": "Set by the installer's Arabic check. If Arabic words show in reverse order on this laptop, set this to true.",
+  "arabic_word_order_fix": false,
 
   "_provider_help": "\"anthropic\" (Claude, recommended) or \"openai_compatible\" (DeepSeek, OpenRouter, ...)",
   "provider": "anthropic",

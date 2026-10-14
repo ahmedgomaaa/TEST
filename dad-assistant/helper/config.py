@@ -10,12 +10,13 @@ import json
 import os
 
 from . import paths
+from .strings import DEFAULT_ASSISTANT_NAME
 
 DEFAULTS = {
-    "assistant_name": "Helper",
+    "assistant_name": DEFAULT_ASSISTANT_NAME,
     "user_name": "",
     "font_size": 15,
-    "arabic_word_order_fix": True,
+    "arabic_word_order_fix": False,
     "provider": "anthropic",
     "anthropic": {
         "api_key": "",
@@ -113,7 +114,7 @@ def _sanitize(cfg, problems):
         problems.append("No API key is set for provider %r in config.json." % provider)
     for section in ("anthropic", "openai_compatible", "images"):
         cfg[section]["api_key"] = str(cfg[section].get("api_key") or "").strip()
-    cfg["assistant_name"] = str(cfg.get("assistant_name") or "Helper").strip() or "Helper"
+    cfg["assistant_name"] = str(cfg.get("assistant_name") or "").strip() or DEFAULT_ASSISTANT_NAME
     cfg["user_name"] = str(cfg.get("user_name") or "").strip()
 
 

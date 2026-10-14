@@ -235,7 +235,8 @@ def message_box(text, title="Helper"):
         log.info("message box: %s", text)
         return
     try:
-        _user32.MessageBoxW(None, text, title, 0x40 | 0x40000)  # ICONINFORMATION | TOPMOST
+        # ICONINFORMATION | TOPMOST | RIGHT | RTLREADING: Windows lays out Arabic correctly by itself.
+        _user32.MessageBoxW(None, text, title, 0x40 | 0x40000 | 0x80000 | 0x100000)
     except Exception:
         pass
 

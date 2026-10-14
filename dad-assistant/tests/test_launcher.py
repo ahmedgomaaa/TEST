@@ -19,6 +19,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import fakes  # noqa: E402
 
+sys.path.insert(0, APP_DIR)
+from helper import strings  # noqa: E402
+
 CRASH_ONCE = '''
 import ctypes, os, sys
 from . import paths, winapi
@@ -90,7 +93,7 @@ class LauncherTests(unittest.TestCase):
         deadline = time.time() + 120
         hwnd = None
         while time.time() < deadline and proc.poll() is None:
-            hwnd = user32.FindWindowW(None, "Helper")
+            hwnd = user32.FindWindowW(None, strings.DEFAULT_ASSISTANT_NAME)
             if hwnd:
                 break
             time.sleep(0.5)
@@ -112,7 +115,7 @@ class LauncherTests(unittest.TestCase):
         deadline = time.time() + 60
         hwnd = None
         while time.time() < deadline and second.poll() is None:
-            hwnd = user32.FindWindowW(None, "Helper")
+            hwnd = user32.FindWindowW(None, strings.DEFAULT_ASSISTANT_NAME)
             if hwnd:
                 break
             time.sleep(0.5)

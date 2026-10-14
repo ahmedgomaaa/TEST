@@ -22,12 +22,13 @@ import time
 import zipfile
 
 from . import net, paths, shell, textutil, winapi
+from . import strings as S
 
 log = logging.getLogger("assistant.tools")
 
 _EXPLANATION = {
     "type": "string",
-    "description": "One short, friendly sentence for the user, in his language, saying what will happen. "
+    "description": "One short, friendly sentence for the user, in simple Egyptian Arabic, saying what will happen. "
                    "It is shown to him in a big Yes/No question.",
 }
 
@@ -330,6 +331,7 @@ class ToolRunner(object):
         self.untouchable = set(_norm(p) for p in self.folders.values())
         self.untouchable.update(_norm(os.path.join(self.home, name)) for name in standard)
         self.undo = UndoJournal(undo_path or paths.UNDO_PATH)
+        self.last_undo = None  # (items restored, problems) after undo_last_change, for the Undo button
 
     # ------------------------------------------------------------------ plumbing
 
@@ -655,7 +657,7 @@ class ToolRunner(object):
         if not plan:
             raise ToolError("Nothing can be moved. " + " ".join(problems[:10]))
         details = ["%s   ->   %s" % (self.friendly(s), self.friendly(d)) for s, d in plan]
-        question = a.get("explanation") or "Move or rename %d items?" % len(plan)
+        question = a.get("explanation") or S.Q_MOVE.format(n=len(plan))
         if not self._confirm(question, details):
             return "The user said NO. Nothing was moved. Ask him what he would like instead."
         ops, done, failed = [], 0, []
@@ -720,8 +722,8 @@ class ToolRunner(object):
                 problems.append(str(e))
         if not targets:
             raise ToolError(" ".join(problems[:10]) or "Nothing can be deleted.")
-        question = a.get("explanation") or "Put %d items in the Recycle Bin?" % len(targets)
-        if not self._confirm(question, ["Recycle Bin:  " + self.friendly(p) for p in targets]):
+        question = a.get("explanation") or S.Q_RECYCLE.format(n=len(targets))
+        if not self._confirm(question, [self.friendly(p) for p in targets]):
             return "The user said NO. Nothing was deleted."
         done, failed = 0, []
         for path in targets:
@@ -757,8 +759,8 @@ class ToolRunner(object):
             else:
                 ext = os.path.splitext(target)[1].lower()
                 if ext in RISKY_TO_OPEN or (ext == ".exe" and not self.is_protected(target)):
-                    if not self._confirm("Run the program %s?" % os.path.basename(target),
-                                         ["Programs from unknown places can be harmful.", self.friendly(target)]):
+                    if not self._confirm(S.Q_RUN_PROGRAM.format(name=os.path.basename(target)),
+                                         [S.D_RUN_PROGRAM, self.friendly(target)]):
                         return "The user said NO, so it was not opened."
         try:
             winapi.open_with_default_app(target)
@@ -770,9 +772,9 @@ class ToolRunner(object):
         batch = self.undo.peek()
         if not batch:
             return "There is nothing to undo."
-        if not self._confirm("Undo the last change?",
+        if not self._confirm(S.Q_UNDO,
                              [str(batch.get("description") or "").rstrip(". "),
-                              "Done at %s. Things will be put back where they were." % batch.get("time")]):
+                              S.D_UNDO_WHEN.format(time=batch.get("time"))]):
             return "The user said NO. Nothing was undone."
         self.undo.pop()
         restored, problems = 0, []
@@ -796,6 +798,7 @@ class ToolRunner(object):
                         pass
             except (OSError, shutil.Error, KeyError) as e:
                 problems.append(str(e))
+        self.last_undo = (restored, problems)
         text = "I undid the last change: %d items were put back where they were." % restored
         if problems:
             text += " Problems: " + " | ".join(problems[:20])
@@ -813,8 +816,8 @@ class ToolRunner(object):
             raise ToolError("Blocked for safety: commands are not allowed to do %s. Use the dedicated tools "
                             "(for deleting: recycle_items) or tell the user this cannot be done here." % why)
         if a.get("changes_things") or shell.looks_like_change(command):
-            question = a.get("explanation") or "Make a change on the computer?"
-            if not self._confirm(question, ["Technical details (for Ahmed): " + command[:400]]):
+            question = a.get("explanation") or S.Q_CHANGE
+            if not self._confirm(question, [S.D_TECHNICAL, command[:400]]):
                 return "The user said NO. The command was not run."
         timeout = self.cfg["safety"]["command_timeout_seconds"]
         result = shell.run(kind, command, timeout=timeout, cancel=self.cancel)

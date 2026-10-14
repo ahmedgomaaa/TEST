@@ -8,6 +8,11 @@ _NON_BMP = re.compile(" ?[\U00010000-\U0010FFFF]+")
 _ARABIC = re.compile("[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFC]")
 _LATIN = re.compile("[A-Za-z]")
 
+# Tk 8.6 draws the words of a line from left to right, so Arabic comes out in reverse word order.
+# When True we reverse the words ourselves.  Set from config "arabic_word_order_fix" at startup (the
+# installer asks which version reads correctly on the laptop).
+REORDER = False
+
 
 def for_tk(text):
     return _NON_BMP.sub("", str(text or "")).replace("\r\n", "\n").replace("\x00", "")
@@ -55,4 +60,14 @@ def rtl_visual_lines(paragraph, max_width, measure):
         else:
             current = candidate
     lines.append(current)
+    if not REORDER:
+        return [" ".join(line) for line in lines]
     return [" ".join(reversed(line)) for line in lines]
+
+
+def rtl(text):
+    """Short text for a button or label: fix the word order of each Arabic line (no wrapping)."""
+    text = for_tk(text)
+    if not REORDER:
+        return text
+    return "\n".join(" ".join(reversed(line.split(" "))) if is_rtl(line) else line for line in text.split("\n"))

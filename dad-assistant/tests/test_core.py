@@ -13,6 +13,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from helper import strings as S  # noqa: E402
 from helper import agent, config, llm, logs, net, paths, report, shell, textutil, tools  # noqa: E402
 
 
@@ -96,9 +97,33 @@ class TextTests(unittest.TestCase):
         self.assertFalse(textutil.is_rtl("Hello"))
 
     def test_rtl_layout_reverses_words_per_line(self):
-        lines = textutil.rtl_visual_lines("one two three four five", 9, len)
-        self.assertEqual(lines, ["two one", "three", "five four"])
-        self.assertEqual(textutil.rtl_visual_lines("", 100, len), [""])
+        with mock.patch.object(textutil, "REORDER", True):
+            lines = textutil.rtl_visual_lines("one two three four five", 9, len)
+            self.assertEqual(lines, ["two one", "three", "five four"])
+            self.assertEqual(textutil.rtl_visual_lines("", 100, len), [""])
+
+    def test_rtl_layout_wraps_without_reversing_when_off(self):
+        with mock.patch.object(textutil, "REORDER", False):
+            self.assertEqual(textutil.rtl_visual_lines("one two three four five", 9, len),
+                             ["one two", "three", "four five"])
+
+    def test_rtl_label(self):
+        arabic = S.SEND + " " + S.STOP
+        with mock.patch.object(textutil, "REORDER", True):
+            self.assertEqual(textutil.rtl(arabic), S.STOP + " " + S.SEND)
+            self.assertEqual(textutil.rtl("A+"), "A+")  # Latin text is left alone
+            self.assertEqual(textutil.rtl(arabic + "\n" + arabic), (S.STOP + " " + S.SEND + "\n") * 1 + S.STOP + " " + S.SEND)
+        with mock.patch.object(textutil, "REORDER", False):
+            self.assertEqual(textutil.rtl(arabic), arabic)
+
+    def test_strings_are_safe_for_tk(self):
+        """Tk 8.6.9 crashes on characters above U+FFFF (emoji), so Dad's texts must not contain any."""
+        for name in dir(S):
+            value = getattr(S, name)
+            values = value.values() if isinstance(value, dict) else [value]
+            for v in values:
+                if isinstance(v, str):
+                    self.assertEqual(textutil.for_tk(v), v, name)
 
     def test_markdown(self):
         self.assertEqual(textutil.strip_markdown("## Title\n**bold** and `code`"), "Title\nbold and code")
@@ -379,7 +404,7 @@ class AgentTests(HomeDirTest):
         a = self.make_agent([net.NetworkError("URLError: offline")])
         a.handle("hi", threading.Event())
         self.assertEqual(self.emitted[-1][0], "error")
-        self.assertIn("internet", self.emitted[-1][1])
+        self.assertIn(S.NO_INTERNET, self.emitted[-1][1])
 
     def test_400_starts_fresh_once(self):
         a = self.make_agent([text_resp("first")])
@@ -404,7 +429,7 @@ class AgentTests(HomeDirTest):
             {"type": "tool_use", "id": "b", "name": "list_folder", "input": {}}], "tool_use")])
         a = agent.Agent(make_cfg(), client, CancellingRunner(), lambda k, v: self.emitted.append((k, v)))
         a.handle("go", cancel)
-        self.assertEqual(self.emitted[-1], ("notice", "Stopped."))
+        self.assertEqual(self.emitted[-1], ("notice", S.STOPPED))
         ids = [r["tool_use_id"] for r in a.messages[-1]["content"]]
         self.assertEqual(ids, ["a", "b"])
         self.assertIn("Stop", a.messages[-1]["content"][1]["content"])

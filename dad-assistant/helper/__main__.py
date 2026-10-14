@@ -55,8 +55,8 @@ def main():
     threading.excepthook = thread_excepthook
 
     if not winapi.single_instance("HomeAssistantWindow"):
-        winapi.message_box("The helper is already open. Look for it at the bottom of the screen.",
-                           cfg["assistant_name"])
+        from . import strings
+        winapi.message_box(strings.ALREADY_OPEN, cfg["assistant_name"])
         return 0
 
     # If the last run did not close normally, tell Ahmed.

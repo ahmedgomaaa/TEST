@@ -1,37 +1,61 @@
-# Helper: an AI assistant for Windows 7 (32-bit)
+# Helper (المساعد): an Arabic AI assistant for Windows 7
 
-A simple chat window that can also **do things on the laptop**: tidy the desktop, sort and rename files, find documents, delete into the Recycle Bin, open programs, find duplicate photos, answer questions and draw pictures. It is built for someone who is not comfortable with computers: big text, big buttons, a Yes/No question before every change, and an Undo button.
+A simple chat window, **in Egyptian Arabic**, that can also **do things on the laptop**: tidy the desktop, sort and rename files, find documents, delete into the Recycle Bin, open programs, find duplicate photos, answer questions and draw pictures. It is built for someone who is not comfortable with computers: big text, big buttons, a Yes/No question before every change, and an Undo button.
 
-It runs on **Python 3.8 (32-bit) + Tkinter** and uses **only the Python standard library**, so nothing has to be installed with pip.
+It runs on **Python 3.8 (32-bit) + Tkinter** and uses **only the Python standard library**. **`HelperSetup.exe` installs everything**, including Python.
 
 ## What Dad sees
 
-- One window with a large chat area, a text box, and a big green **Send** button. Enter sends; Shift+Enter starts a new line.
-- **Stop** cancels the current task. **New conversation** clears the chat. **Undo last change** puts moved or renamed files back.
-- **Ask Ahmed for help** e-mails you his note plus the log file.
+Everything is in Arabic and laid out right to left. The AI answers in simple Egyptian Arabic, or in English if he writes in English.
+
+- One window with a large chat area, a text box, and a big green **إرسال** (Send) button. Enter sends; Shift+Enter starts a new line.
+- **إيقاف** (Stop) cancels the current task. **محادثة جديدة** (New conversation) clears the chat. **تراجع عن آخر تغيير** (Undo last change) puts moved or renamed files back.
+- **اطلب مساعدة أحمد** (Ask Ahmed for help) e-mails you his note plus the log file.
 - **A+ / A-** change the text size.
-- Before any change, a big question appears, for example "I will put your 34 photos in a folder called Photos on the desktop", with **Yes, go ahead** and **No** buttons.
+- Before any change, a big question appears, for example "هحط الـ 34 صورة في فولدر جديد اسمه صور", with **أيوه، كمّل** (Yes, go ahead) and **لأ** (No) buttons.
+- Messages for you (e-mail reports, logs) stay in English. All of Dad's texts are in `helper/strings.py`, so wording can be changed in one place.
 
-## One-time setup on the laptop (about 20 minutes)
+## Installing: one file, `HelperSetup.exe`
 
-1. **Windows updates Python needs.** The laptop needs Windows 7 **Service Pack 1** plus update **KB2533623**. If Windows says that update is "not applicable", install its replacement **KB3063858** instead. Without one of them, Python fails to start with an error about `api-ms-win-crt` or `LoadLibrary`.
-2. **Install Python 3.8.10, 32-bit.** Download `python-3.8.10.exe` from python.org (the "Windows x86 executable installer"). 3.8.10 is the last 3.8 release with a Windows installer and the last official Python for Windows 7.
-   - Use the default "Install Now". Keep "tcl/tk and IDLE" and the "py launcher" ticked; they are on by default.
-   - If it complains about the Universal C Runtime, install Windows update **KB2999226** and try again.
-3. **Copy the `dad-assistant` folder** to somewhere in his user folder, for example `C:\Users\Dad\Helper`. Don't put it in Program Files.
-4. **Double-click `SETUP.bat`.** It:
-   - checks Python and Tkinter,
-   - creates `config.json` and opens it in Notepad (fill it in, then save and close),
-   - tests the AI connection and sends a test e-mail,
-   - puts a **Helper** icon on the desktop.
+Copy `HelperSetup.exe` to the laptop and double-click it. It asks for administrator rights once, then:
 
-   You can run `SETUP.bat` again at any time; it's safe.
+1. **Checks Windows.** Windows 7 **Service Pack 1** or newer is needed. On Windows XP/Vista, or Windows 7 without SP1, it explains this in Arabic and changes nothing.
+2. **Installs the Windows update Python needs, if it's missing.** Python 3.8 needs KB2533623 on Windows 7. Microsoft no longer offers that update, so setup bundles **KB2758857**, which replaces it (Microsoft-signed, x86 and x64). After it is installed the laptop must restart. Setup offers to restart and then continues by itself through a "highest privileges" log-on task. A **كمّل تثبيت المساعد** (continue installing) icon on the desktop is the fallback.
+3. **Installs Python 3.8.10 32-bit** for this user, silently, if no working Python 3.8 is found. A broken one is repaired first. Python is bundled (official installer, signature checked when building), so **no internet is needed for installing**.
+4. **Settings page:** Dad's name, the Claude API key, your e-mail for reports, the Gmail address that sends (empty means your own address) and its App Password. On a reinstall, leave a box empty to keep the old value. Your e-mail is checked for an `@`.
+5. **Arabic check:** shows the same Arabic sentence twice, numbered 1 and 2, in the same font and kind of text box as the chat. You click the number of the one that reads correctly. This sets `arabic_word_order_fix` (see below). It runs only on the first install.
+6. **Shortcuts:** an **المساعد** icon on the desktop and in the Start menu. Both start the helper with `pythonw.exe` directly, without relying on file associations. There is also an uninstaller in "Add or remove programs".
+7. **Tests** the AI connection and sends a test e-mail, then shows the result in Arabic: for example a wrong key, no credit, no internet, a wrong clock or a rejected Gmail password.
+
+Every step is logged to `%TEMP%\HelperSetup.log`, which is copied to `data\logs\setup.log` next to the app. Every failure shows a short Arabic message and where the log is. The app goes to `%LOCALAPPDATA%\Programs\Helper`.
+
+**Running it again is safe.** It keeps `config.json` and `data\`, reuses Python, and asks you to close the helper first if it is open. That's also how you change the API key or e-mail later. **Uninstalling** asks whether to keep the settings and logs (default: keep) and leaves Python installed.
+
+### Building `HelperSetup.exe`
+
+Run `installer/build.sh` on Linux (`apt install nsis`) or with NSIS 3 on Windows. It:
+
+- downloads Python 3.8.10 and the two KB2758857 packages into `installer/payload/` (git-ignored),
+- **refuses to build** if a SHA-256 hash doesn't match,
+- writes `installer/dist/HelperSetup.exe` (about 43 MB).
+
+For a silent test install, use `HelperSetup.exe /S /NAME=... /APIKEY=... /EMAIL=... /SENDER=... /APPPASS=... [/NOTEST]`.
+
+### Manual install (alternative)
+
+The old way still works:
+
+1. Install the Windows updates and Python 3.8.10 32-bit yourself.
+2. Copy this folder to the laptop.
+3. Run `SETUP.bat`. It checks Python, creates `config.json`, tests the connection and makes a shortcut.
 
 ### What to put in `config.json`
 
 | Setting | What it is |
 |---|---|
-| `user_name` | Dad's name, used in the greeting. |
+| `user_name` | Dad's name, used in the greeting ("أهلاً يا ..."). |
+| `assistant_name` | Empty means **المساعد**. |
+| `arabic_word_order_fix` | Set by the installer's Arabic check. Tk draws Arabic in reverse word order when the font has no Arabic letters (each word is drawn separately). The app uses **Tahoma**, which has Arabic on every Windows 7, so this is normally `false`. Set it to `true` only if Arabic words show in reverse order. |
 | `anthropic.api_key` | A Claude API key from console.anthropic.com. **A Claude Pro/Max/Claude Code subscription cannot be used here**; the API is billed separately. Set a monthly spend limit in the console. |
 | `anthropic.model` / `effort` | Defaults: `claude-opus-5-5` with `medium` effort. For lower cost, use `claude-sonnet-5-5` or `claude-haiku-5-5`, or lower the effort to `low`. |
 | `anthropic.use_fallbacks` | If Claude declines a request, the API retries it on a fallback model automatically. Turned off automatically if your model doesn't support it. |
@@ -94,9 +118,18 @@ How to run the tests:
 - **PowerShell wrapper outside Windows:** set `PWSH=/path/to/pwsh` to run it against PowerShell 7.
 - **On Windows:** the same command also runs the Windows-only tests (`test_windows.py`, `test_launcher.py`).
 
+### Arabic version and installer (verified on Wine 9.0, Windows 7 SP1 32-bit mode)
+
+- **Tests:** all 85 pass on the official Windows Python 3.8.10 32-bit (8 skipped because they need a real `powershell.exe`) and on Linux Python 3.13.
+- **Full install on a brand-new Windows 7 profile with no Python**, driven through the real installer window: welcome page, settings page (Arabic name typed in, a bad e-mail rejected with an Arabic message), silent Python 3.8.10 install, Python check (OpenSSL 1.1.1k, Tk 8.6), `config.json` written, Arabic check window, shortcuts with Arabic names, uninstall entry, test step (the real Claude API was reached and a fake key was reported as wrong, in Arabic), finish page, and the app opening in Arabic.
+- **Reinstall over an existing install:** settings kept byte-for-byte, Python reused, no Arabic check.
+- **Windows update path** (test build that simulates wusa's "restart needed", because Wine cannot install Microsoft packages): the Arabic explanation and restart question, and the resume copy and desktop icon. Running it after the "restart" with `/AFTERREBOOT` finished the install and removed the icon. The real Wine `wusa` failure was reported with its error code, and setup stopped without changing anything.
+- **Uninstall:** app files, shortcuts and the registry entry removed; settings, logs and Python kept.
+- **App:** the main window, the Yes/No question (with Arabic file names) and error messages all read right to left. Sending a message with a fake key showed "في مشكلة في إعدادات الحساب بتاعي" and logged the API's 401.
+
 ### What was verified on Windows 7 SP1 32-bit (Wine 9.0, Windows 7 mode, official Python 3.8.10 32-bit)
 
-All tests pass: 76 on Windows Python, 8 skipped because they need a real `powershell.exe`. On top of that, the real app was driven through its window with simulated mouse and keyboard.
+All tests passed at the time: 76 on Windows Python, 8 skipped because they need a real `powershell.exe`. On top of that, the real app was driven through its window with simulated mouse and keyboard.
 
 **The app itself**
 - **Launch:** `Start Assistant.pyw` under `pythonw.exe`, installed in a folder with an Arabic name and spaces, and a `config.json` saved with a Notepad-style BOM.
@@ -134,15 +167,16 @@ All tests pass: 76 on Windows Python, 8 skipped because they need a real `powers
 - PowerShell output printed before an error was lost.
 - A native crash could show Windows' "stopped working" box, and Wine reported exit code 0, so the app wasn't restarted.
 - Arabic was garbled in the emailed log.
-- Arabic sentences showed in reverse word order. Tk 8.6 draws each word left to right, so the app now lays out right-to-left lines itself.
+- Arabic sentences showed in reverse word order. Tk draws each word separately when the font has no Arabic letters, so the app can reverse the words itself (`arabic_word_order_fix`). The Arabic version uses Tahoma, which has Arabic letters. With it, Wine showed every widget in the correct order without the fix, so the default is now off and the installer's check confirms it on the laptop.
 - Main folders weren't protected when the profile path and Windows' reported folder differ.
 
 ### Not verified, so check on the real laptop
 
 - **PowerShell 2.0:** Wine has no real PowerShell. The wrapper was checked against PowerShell 7 and uses only PowerShell 2.0 constructs.
-- **Arabic word order on real Windows:** Wine showed the problem described above. If Arabic looks reversed on the laptop, set `"arabic_word_order_fix": false` in `config.json`. Typing Arabic in the input box may also show words in reverse order while typing; what is sent is correct.
-- **Real servers:** the live Claude API and Gmail weren't reachable from the test environment. `SETUP.bat` tests both on the laptop.
-- **Python installer and Windows updates:** the KB2533623 requirement can't be emulated.
+- **Arabic word order on real Windows:** the installer's check sets it. If Arabic looks reversed later, flip `arabic_word_order_fix` in `config.json`.
+- **Typing Arabic with the keyboard:** Tk accepted Arabic characters sent as Windows keyboard messages. The test tool's simulated Arabic keystrokes reached Tk as "?" under Wine (they did reach the installer's native boxes), so try typing a few Arabic words on the laptop.
+- **Gmail:** e-mail could not leave the test environment. The installer's test step sends a real test e-mail on the laptop.
+- **The real KB2758857 install, the restart and the log-on task:** Wine cannot install Microsoft packages or create log-on tasks. If the task does not start setup after the restart, double-click "كمّل تثبيت المساعد" on the desktop.
 
 ## For developers
 
@@ -158,5 +192,8 @@ All tests pass: 76 on Windows Python, 8 skipped because they need a real `powers
 | `helper/net.py` | HTTPS, retries and Stop. |
 | `helper/report.py` | E-mail reports. |
 | `helper/winapi.py` | ctypes calls: Recycle Bin, known folders, mutex, crash dialogs. |
+| `helper/strings.py` | Every text Dad sees, in Egyptian Arabic. |
+| `install_helper.py` | The steps the installer runs with the new Python: settings, Arabic check, tests. |
+| `installer/HelperSetup.nsi`, `installer/build.sh` | The one-file installer. |
 
-- Keep everything **Python 3.8 compatible**, **standard library only**, and the source files ASCII-only.
+- Keep everything **Python 3.8 compatible** and **standard library only**. Source files are ASCII, except the Arabic texts (`helper/strings.py`, `install_helper.py`, the examples in the system prompt and the installer script). All files are UTF-8.
