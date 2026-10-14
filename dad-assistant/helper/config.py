@@ -47,9 +47,15 @@ DEFAULTS = {
     },
     "safety": {
         "confirm_changes": True,
+        "allow_all_commands": False,
         "command_timeout_seconds": 120,
     },
     "max_steps_per_request": 30,
+    "max_context_tokens": 0,
+    "memory": {
+        "enabled": True,
+        "effort": "low",
+    },
     "updates": {
         "enabled": True,
         "manifest_url": "https://github.com/ahmedgomaaa/TEST/releases/download/helper-installer-latest/update.json",

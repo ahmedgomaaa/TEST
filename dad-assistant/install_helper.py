@@ -43,6 +43,11 @@ AR = {
     "mail_offline": "• مشكلة: مقدرتش أوصل لسيرفر الإيميل (Gmail). اتأكد من الإنترنت، وإن برنامج الحماية مش مانع البرنامج.",
     "mail_other": "• مشكلة: مقدرتش أبعت الإيميل التجريبي: {err}",
     "internal": "• مشكلة: حصل خطأ داخلي أثناء الاختبار. التفاصيل في ملف install.log.",
+    "ps_already": "• تمام: PowerShell {version} موجود فعلاً.",
+    "ps_restart": "• تمام: PowerShell 5.1 اتثبّت، وهيشتغل بعد إعادة تشغيل الكمبيوتر.",
+    "ps_download": "• مشكلة: مقدرتش أحمّل PowerShell 5.1 ({what}). اتأكد من الإنترنت وشغّل برنامج التثبيت تاني.",
+    "ps_failed": "• مشكلة: تثبيت {what} فشل (رقم {code}). المساعد هيشتغل عادي بـ PowerShell 2.0.",
+    "ps_unsupported": "• مشكلة: PowerShell 5.1 محتاج ويندوز 7 Service Pack 1 أو أحدث.",
 }
 
 
@@ -302,11 +307,155 @@ def cmd_test(args):
     return code
 
 
+# ------------------------------------------------------------------ install-powershell
+# PowerShell 5.1 = Windows Management Framework 5.1 (KB3191566), which needs .NET Framework 4.5.2 or newer
+# (4.8 is installed).  Downloaded from Microsoft with this Python (its own TLS works on Windows 7),
+# each file checked against the SHA-256 below before it runs.
+NET48 = ("ndp48-x86-x64-allos-enu.exe",
+         "https://download.visualstudio.microsoft.com/download/pr/2d6bb6b2-226a-4baa-bdec-798822606ff1/"
+         "8494001c276a4b96804cde7829c04d7f/ndp48-x86-x64-allos-enu.exe",
+         "68c9986a8dcc0214d909aa1f31bee9fb5461bb839edca996a75b08ddffc1483f")
+WMF51 = {
+    "x86": ("Win7-KB3191566-x86.zip",
+            "https://download.microsoft.com/download/6/F/5/6F5FF66C-6775-42B0-86C4-47D41F2DA187/Win7-KB3191566-x86.zip",
+            "eb7e2c4ce2c6cb24206474a6cb8610d9f4bd3a9301f1cd8963b4ff64e529f563"),
+    "x64": ("Win7AndW2K8R2-KB3191566-x64.zip",
+            "https://download.microsoft.com/download/6/F/5/6F5FF66C-6775-42B0-86C4-47D41F2DA187/"
+            "Win7AndW2K8R2-KB3191566-x64.zip",
+            "f383c34aa65332662a17d95409a2ddedadceda74427e35d05024cd0a6a2fa647"),
+}
+NET48_RELEASE = 528040     # registry "Release" of .NET 4.8
+NET452_RELEASE = 379893    # the minimum WMF 5.1 accepts
+RESTART = (3010, 1641, 0x00240005, 0x00240006)
+PS_RESTART_CODE = 10
+
+
+def _reg_value(path, name):
+    import winreg
+    for view in (getattr(winreg, "KEY_WOW64_64KEY", 0), 0):
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_READ | view) as key:
+                return winreg.QueryValueEx(key, name)[0]
+        except OSError:
+            continue
+    return None
+
+
+def windows_arch():
+    """"x64" or "x86" for Windows itself (this Python is 32-bit, so ask the environment)."""
+    arch = os.environ.get("PROCESSOR_ARCHITEW6432") or os.environ.get("PROCESSOR_ARCHITECTURE") or "x86"
+    return "x64" if arch.upper() in ("AMD64", "IA64", "ARM64") else "x86"
+
+
+def _system_exe(name):
+    """A program in the real System32 (not the 32-bit SysWOW64 copy)."""
+    windir = os.environ.get("SystemRoot", r"C:\Windows")
+    native = os.path.join(windir, "Sysnative", name)
+    return native if os.path.exists(native) else os.path.join(windir, "System32", name)
+
+
+def download_checked(name, url, sha256, folder):
+    """Download (with progress lines) and check the SHA-256.  Returns the file path or raises."""
+    from helper import net
+    import hashlib
+    import urllib.request
+    path = os.path.join(folder, name)
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            if hashlib.sha256(f.read()).hexdigest() == sha256:
+                return path
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=net.ssl_context()))
+    req = urllib.request.Request(url, headers={"User-Agent": net.USER_AGENT})
+    digest = hashlib.sha256()
+    last = -1
+    with opener.open(req, timeout=60) as resp, open(path + ".part", "wb") as out:
+        total = int(resp.headers.get("Content-Length") or 0)
+        done = 0
+        while True:
+            chunk = resp.read(256 * 1024)
+            if not chunk:
+                break
+            out.write(chunk)
+            digest.update(chunk)
+            done += len(chunk)
+            if total and done * 10 // total != last:
+                last = done * 10 // total
+                say("Downloading %s: %d%% of %d MB" % (name, last * 10, total // (1024 * 1024)))
+    if digest.hexdigest() != sha256:
+        os.remove(path + ".part")
+        raise ValueError("%s: SHA-256 %s does not match" % (name, digest.hexdigest()))
+    os.replace(path + ".part", path)
+    return path
+
+
+def _run(args, what):
+    import subprocess
+    say("Running %s" % what)
+    code = subprocess.call(args)
+    install_log("%s exit code %s" % (what, code))
+    say("%s exit code %s" % (what, code))
+    return code
+
+
+def cmd_install_powershell(args):
+    """Install .NET 4.8 (if needed) and PowerShell 5.1.  0 = done, 10 = done after a restart, 1 = failed."""
+    result_path = args[0]
+    folder = args[1] if len(args) > 1 else os.path.join(os.environ.get("TEMP", "."), "HelperSetup-ps51")
+    lines, code = [], 1
+
+    def finish():
+        with io.open(result_path, "w", encoding="utf-16-le", newline="\r\n") as f:
+            f.write("\n".join(lines) + "\n")
+        return code
+
+    version = str(_reg_value(r"SOFTWARE\Microsoft\PowerShell\3\PowerShellEngine", "PowerShellVersion") or "")
+    if version >= "5.1":
+        lines.append(AR["ps_already"].format(version=version))
+        code = 0
+        return finish()
+    os.makedirs(folder, exist_ok=True)
+    release = _reg_value(r"SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full", "Release") or 0
+    if int(release) < NET452_RELEASE:
+        try:
+            exe = download_checked(*NET48, folder=folder)
+        except Exception as e:
+            install_log(".NET 4.8 download failed: %r" % e)
+            lines.append(AR["ps_download"].format(what=".NET 4.8"))
+            return finish()
+        result = _run([exe, "/q", "/norestart"], ".NET Framework 4.8")
+        if result != 0 and result not in RESTART:
+            lines.append(AR["ps_failed"].format(what=".NET 4.8", code=result))
+            return finish()
+    try:
+        zpath = download_checked(*WMF51[windows_arch()], folder=folder)
+        import zipfile
+        with zipfile.ZipFile(zpath) as z:
+            msu_name = [n for n in z.namelist() if n.lower().endswith(".msu")][0]
+            z.extract(msu_name, folder)
+        msu = os.path.join(folder, msu_name)
+    except Exception as e:
+        install_log("WMF 5.1 download failed: %r" % e)
+        lines.append(AR["ps_download"].format(what="WMF 5.1"))
+        return finish()
+    result = _run([_system_exe("wusa.exe"), msu, "/quiet", "/norestart"], "WMF 5.1 (KB3191566)")
+    if result == 0x80240017 or result == -2145124329:  # "not applicable": Windows 7 without SP1
+        lines.append(AR["ps_unsupported"])
+        return finish()
+    if result not in (0,) + RESTART:
+        lines.append(AR["ps_failed"].format(what="WMF 5.1", code=hex(result & 0xFFFFFFFF)))
+        return finish()
+    # WMF 5.1 replaces PowerShell itself: it only runs after a restart (wusa reports 3010).
+    lines.append(AR["ps_restart"])
+    code = PS_RESTART_CODE
+    return finish()
+
+
 COMMANDS = {
     "check-python": cmd_check_python,
     "write-config": cmd_write_config,
     "arabic-check": cmd_arabic_check,
     "test": cmd_test,
+    "install-powershell": cmd_install_powershell,
 }
 
 

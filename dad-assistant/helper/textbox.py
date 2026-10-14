@@ -73,6 +73,10 @@ class TkBox(object):
     def clear(self):
         self.widget.delete("1.0", "end")
 
+    def set(self, text):
+        self.clear()
+        self.widget.insert("1.0", text, "rtl")
+
     def focus(self):
         self.widget.focus_set()
 
@@ -176,6 +180,10 @@ class NativeBox(object):
 
     def clear(self):
         self._user32.SetWindowTextW(self.hwnd, "")
+
+    def set(self, text):
+        self._user32.SetWindowTextW(self.hwnd, text.replace("\n", "\r\n"))
+        self._user32.SendMessageW(self.hwnd, EM_SETSEL, 0, -1)  # selected, so typing replaces it
 
     def focus(self):
         self._user32.SetFocus(self.hwnd)

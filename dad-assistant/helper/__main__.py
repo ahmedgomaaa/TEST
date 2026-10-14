@@ -24,13 +24,13 @@ def _tell_about_update(app, reporter, notice):
     from . import strings
     try:
         if notice.get("kind") == "updated":
-            app._write(strings.UPDATED.format(build=notice.get("to")), "notice")
+            app._write(strings.UPDATED.format(build=notice.get("to")), "notice", record=False)
             reporter.send_async("Updated to build %s" % notice.get("to"),
                                 "The helper updated itself from build %s to build %s (commit %s).\n\n%s"
                                 % (notice.get("from"), notice.get("to"), notice.get("commit"),
                                    notice.get("notes") or ""), attach_log=False)
         elif notice.get("kind") == "rolled_back":
-            app._write(strings.ROLLED_BACK, "notice")
+            app._write(strings.ROLLED_BACK, "notice", record=False)
     except Exception:
         logging.getLogger("assistant").exception("Could not show the update notice")
 

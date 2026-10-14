@@ -33,6 +33,20 @@ Every step is logged to `%TEMP%\HelperSetup.log`, which is copied to `data\logs\
 
 **Running it again is safe.** It keeps `config.json` and `data\`, reuses Python, and asks you to close the helper first if it is open. That's also how you change the API key or e-mail later. **Uninstalling** asks whether to keep the settings and logs (default: keep) and leaves Python installed.
 
+## Conversations, memory and long chats
+
+- **Side panel (right):** every conversation is saved by itself in `data\conversations\`, listed newest first. Double-click or **فتح** (open) continues an old one with its full history. **تغيير الاسم** renames it, and **حذف** deletes it into `data\conversations\trash\`, from which it can be restored by hand. Titles start as the first words; the memory step replaces them with a short Arabic title unless you renamed the conversation.
+- **Shared memory ("اللي فاكره"):** after a conversation has been quiet for 90 seconds, when another one is opened, and at the next start for anything left over, the helper sends the new part of the conversation (only what was said, no tool output) plus everything it already remembers to the AI. It asks what is worth keeping long term: family, preferences, important files, how problems were solved, and anything he asked it to remember, but never passwords or ID numbers. The answer adds, corrects or removes short Arabic items in `data\memory.json`. Every new conversation starts with them. The memory window shows them, and any item can be deleted. It uses the same AI at low effort, set in `"memory"` in `config.json`.
+- **Context: up to 1 million tokens with Claude** (DeepSeek: about 128 000). The whole conversation is prompt-cached, so re-reading a long chat costs about a tenth of the normal input price. The real size reported by the service is tracked. At 85% of the limit, the helper asks the AI for a summary of the older part and continues seamlessly with the summary. `max_context_tokens` in `config.json` lowers the limit (0 = the most the service allows). **Cost:** on Claude Opus 5.5 a message in a conversation that is already 900 000 tokens long re-reads that history from the cache at about $0.20 per million tokens, so about $0.18 per message. The cache is kept for 1 hour; after a longer pause the first message re-reads the history at full price (about $3.60 at 900 000 tokens). Start new conversations for new topics.
+
+## PowerShell
+
+Windows 7 comes with PowerShell 2.0. The installer offers **PowerShell 5.1** (Windows Management Framework 5.1, plus .NET Framework 4.8 if needed) on its own page, ticked by default. It is downloaded from Microsoft during setup by Python, about 165 MB. Each file is checked against a pinned SHA-256, then installed silently, and the finish page offers the restart it needs. Silent installs: `/PS51`.
+
+The helper reads the PowerShell version from the registry and tells the AI what it can use: the full 5.1 command set (`Compress-Archive`, `Invoke-WebRequest`, JSON, CIM, ...) or the 2.0 rules. Zipping and unzipping also have their own built-in tools that work on any version.
+
+The safety block list (permanent deleting, installing, registry, accounts, ...) stays on by default. Setting `"allow_all_commands": true` under `"safety"` in `config.json` lets the AI run any command; every change still asks Yes/No first.
+
 ## Automatic updates (fix things remotely)
 
 Every time the helper starts, the launcher checks `update.json` in the GitHub release `helper-installer-latest` (8-second limit; offline means it just starts). If the build number there is higher than its own, it:
@@ -215,6 +229,10 @@ All tests passed at the time: 76 on Windows Python, 8 skipped because they need 
 | `helper/report.py` | E-mail reports. |
 | `helper/winapi.py` | ctypes calls: Recycle Bin, known folders, mutex, crash dialogs. |
 | `helper/strings.py` | Every text Dad sees, in Egyptian Arabic. |
+| `helper/conversations.py` | Saved conversations (side panel). |
+| `helper/memory.py` | The shared memory and its background worker. |
+| `helper/textbox.py` | The native Windows right-to-left text box. |
+| `helper/updater.py` | Automatic updates from GitHub. |
 | `install_helper.py` | The steps the installer runs with the new Python: settings, Arabic check, tests. |
 | `installer/HelperSetup.nsi`, `installer/build.sh` | The one-file installer. |
 

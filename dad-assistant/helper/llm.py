@@ -17,6 +17,9 @@ log = logging.getLogger("assistant.llm")
 
 MAX_TOKENS = 16000
 REQUEST_TIMEOUT = 300
+# One hour, not the default five minutes: Dad reads and types slowly, and an expired cache means paying the
+# full price to re-read the whole conversation.
+CACHE = {"type": "ephemeral", "ttl": "1h"}
 
 
 class ConfigError(Exception):
@@ -35,6 +38,16 @@ class LLMResponse(object):
     def tool_uses(self):
         return [b for b in self.content if b.get("type") == "tool_use"]
 
+    def context_tokens(self):
+        """How big the conversation is now (what the next request will at least send), or None."""
+        u = self.usage or {}
+        if "input_tokens" in u:  # Anthropic: cached and uncached input, plus this answer
+            return sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
+                                                   "cache_creation_input_tokens", "output_tokens"))
+        if "prompt_tokens" in u:  # OpenAI-compatible
+            return int(u.get("prompt_tokens") or 0) + int(u.get("completion_tokens") or 0)
+        return None
+
 
 class AnthropicLLM(object):
     def __init__(self, settings):
@@ -42,6 +55,7 @@ class AnthropicLLM(object):
         self.model = settings.get("model") or "claude-opus-5-5"
         self.effort = settings.get("effort") or None
         self.use_fallbacks = bool(settings.get("use_fallbacks", True))
+        self.cache = dict(CACHE)
         self.url = (settings.get("base_url") or "https://api.anthropic.com").rstrip("/") + "/v1/messages"
         if not self.api_key:
             raise ConfigError("No Anthropic API key in config.json")
@@ -50,8 +64,10 @@ class AnthropicLLM(object):
         payload = {
             "model": self.model,
             "max_tokens": MAX_TOKENS,
-            "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            "system": [{"type": "text", "text": system, "cache_control": self.cache}],
             "messages": messages,
+            # Cache the whole conversation too, so a long chat is re-read at a tenth of the price.
+            "cache_control": self.cache,
         }
         if tools:
             payload["tools"] = tools
@@ -70,7 +86,7 @@ class AnthropicLLM(object):
     def create(self, system, tools, messages, cancel=None):
         # Optional features are switched off one at a time if the API rejects them
         # (for example after Ahmed changes "model" to one that does not support them).
-        for _ in range(3):
+        for _ in range(4):
             try:
                 data = net.post_json(
                     self.url, self._payload(system, tools, messages), self._headers(),
@@ -82,6 +98,10 @@ class AnthropicLLM(object):
                 if e.status == 400 and self.use_fallbacks and ("fallback" in body or "beta" in body):
                     log.warning("Disabling refusal fallbacks: %s", e)
                     self.use_fallbacks = False
+                    continue
+                if e.status == 400 and "ttl" in self.cache and ("ttl" in body or "cache_control" in body):
+                    log.warning("Using the default cache lifetime: %s", e)
+                    self.cache = {"type": "ephemeral"}
                     continue
                 if e.status == 400 and self.effort and ("effort" in body or "output_config" in body):
                     log.warning("Disabling effort setting: %s", e)

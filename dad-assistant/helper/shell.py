@@ -132,6 +132,31 @@ def shorten(text, limit=MAX_OUTPUT_CHARS):
     return "%s\n\n[... %d characters cut ...]\n\n%s" % (head, len(text) - len(head) - len(tail), tail)
 
 
+_ps_version = []
+
+
+def powershell_version():
+    """"5.1.14409.1005", "2.0", ... from the registry (cached), or None if unknown / not Windows."""
+    if _ps_version:
+        return _ps_version[0]
+    version = None
+    if winapi.IS_WINDOWS:
+        import winreg
+        for engine in (r"SOFTWARE\Microsoft\PowerShell\3\PowerShellEngine", r"SOFTWARE\Microsoft\PowerShell\1\PowerShellEngine"):
+            for view in (getattr(winreg, "KEY_WOW64_64KEY", 0), 0):
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, engine, 0, winreg.KEY_READ | view) as key:
+                        version = str(winreg.QueryValueEx(key, "PowerShellVersion")[0])
+                        break
+                except OSError:
+                    continue
+            if version:
+                break
+    log.info("PowerShell version: %s", version)
+    _ps_version.append(version)
+    return version
+
+
 def _powershell_exe():
     root = os.environ.get("SystemRoot", r"C:\Windows")
     for sub in ("System32", "Sysnative", "SysWOW64"):

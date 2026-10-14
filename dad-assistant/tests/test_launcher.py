@@ -56,6 +56,9 @@ class LauncherTests(unittest.TestCase):
                         ignore=shutil.ignore_patterns("__pycache__"))
         with open(os.path.join(root, "helper", "__main__.py"), "w") as f:
             f.write(main_source)
+        # No automatic update from GitHub in tests: it would replace this stand-in app with the real one.
+        with open(os.path.join(root, "config.json"), "w", encoding="utf-8") as f:
+            json.dump({"updates": {"enabled": False}}, f)
         return root
 
     def launch(self, root):
@@ -79,6 +82,7 @@ class LauncherTests(unittest.TestCase):
         with open(os.path.join(APP_DIR, "config.example.json"), encoding="utf-8") as f:
             cfg = json.load(f)
         cfg["anthropic"]["api_key"] = "sk-ant-test"
+        cfg["updates"] = {"enabled": False}
         cfg["email_reports"].update({"send_to": "ahmed@example.com", "smtp_username": "from@example.com",
                                      "smtp_app_password": "abcdefghijklmnop", "smtp_host": "localhost",
                                      "smtp_port": smtp.port})

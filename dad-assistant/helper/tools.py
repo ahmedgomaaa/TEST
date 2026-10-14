@@ -143,6 +143,34 @@ TOOL_DEFS = [
         },
     },
     {
+        "name": "zip_files",
+        "description": "Put files and/or folders into a new .zip file (for example to send them by e-mail). "
+                       "Works on every Windows version; prefer this over commands.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "paths": {"type": "array", "items": {"type": "string"}, "description": "Full paths of files/folders."},
+                "zip_path": {"type": "string", "description": "Full path of the new .zip file to create."},
+                "explanation": _EXPLANATION,
+            },
+            "required": ["paths", "zip_path", "explanation"],
+        },
+    },
+    {
+        "name": "unzip_file",
+        "description": "Unpack a .zip file into a new folder (by default next to the zip, named after it). "
+                       "Existing files are never overwritten.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "zip_path": {"type": "string", "description": "Full path of the .zip file."},
+                "folder": {"type": "string", "description": "Optional full path of the folder to unpack into."},
+                "explanation": _EXPLANATION,
+            },
+            "required": ["zip_path", "explanation"],
+        },
+    },
+    {
         "name": "undo_last_change",
         "description": "Undo the most recent change made with move_items or create_folder (put things back). "
                        "Deleted items cannot be undone here; they are in the Recycle Bin.",
@@ -768,6 +796,99 @@ class ToolRunner(object):
             raise ToolError("Windows could not open %s (%s)." % (target, e.strerror or e))
         return "Opened %s." % target
 
+    def tool_zip_files(self, a):
+        sources = [self.resolve(p) for p in (a.get("paths") or []) if isinstance(p, str) and p.strip()]
+        if not sources:
+            raise ToolError("No files were given to zip.")
+        missing = [p for p in sources if not os.path.exists(p)]
+        if missing:
+            raise ToolError("These do not exist: %s" % " | ".join(missing[:10]))
+        target = self.resolve(a.get("zip_path"), "zip file path")
+        if not target.lower().endswith(".zip"):
+            target += ".zip"
+        if self.is_protected(target):
+            raise ToolError("I am not allowed to create files in %s." % os.path.dirname(target))
+        target = _unique_path(target)
+        files = []
+        for src in sources:
+            if os.path.isdir(src):
+                for root, _dirs, names in os.walk(src):
+                    for name in names:
+                        full = os.path.join(root, name)
+                        files.append((full, os.path.relpath(full, os.path.dirname(src))))
+            else:
+                files.append((src, os.path.basename(src)))
+        if _norm(target) in set(_norm(f) for f, _ in files):
+            raise ToolError("The zip file cannot be inside what is being zipped.")
+        question = a.get("explanation") or S.Q_ZIP.format(n=len(files))
+        if not self._confirm(question, [self.friendly(p) for p in sources[:20]] + ["->  " + self.friendly(target)]):
+            return "The user said NO. No zip file was made."
+        import zipfile
+        done, failed = 0, []
+        created = []
+        self._makedirs(os.path.dirname(target), created)
+        try:
+            with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as z:
+                for full, arc in files:
+                    if self._cancelled():
+                        failed.append("Stopped by the user.")
+                        break
+                    try:
+                        z.write(full, arc)
+                        done += 1
+                    except (OSError, ValueError) as e:
+                        failed.append("%s: %s" % (self.friendly(full), getattr(e, "strerror", None) or e))
+        except OSError as e:
+            raise ToolError("Could not create %s (%s)." % (target, e.strerror or e))
+        text = "Created %s with %d file(s) (%s)." % (target, done, textutil.human_size(os.path.getsize(target)))
+        if failed:
+            text += " Problems: " + " | ".join(failed[:20])
+        return text
+
+    def tool_unzip_file(self, a):
+        import zipfile
+        source = self.resolve(a.get("zip_path"), "zip file")
+        if not os.path.isfile(source):
+            raise ToolError("%s does not exist." % source)
+        folder = a.get("folder")
+        target = self.resolve(folder) if folder else os.path.splitext(source)[0]
+        if not os.path.isdir(target):
+            target = _unique_path(target)
+        if self.is_protected(target):
+            raise ToolError("I am not allowed to unpack into %s." % target)
+        try:
+            z = zipfile.ZipFile(source)
+        except (zipfile.BadZipFile, OSError) as e:
+            raise ToolError("%s is not a zip file I can open (%s)." % (source, e))
+        with z:
+            members = [m for m in z.infolist() if not m.is_dir()]
+            question = a.get("explanation") or S.Q_UNZIP.format(n=len(members))
+            if not self._confirm(question, [self.friendly(source) + "  ->  " + self.friendly(target)]):
+                return "The user said NO. Nothing was unpacked."
+            root = os.path.abspath(target)
+            done, skipped = 0, []
+            for m in members:
+                if self._cancelled():
+                    skipped.append("Stopped by the user.")
+                    break
+                dest = os.path.abspath(os.path.join(root, *[p for p in m.filename.replace("\\", "/").split("/")
+                                                            if p not in ("", ".", "..")]))
+                if not _norm(dest).startswith(_norm(root) + os.sep):
+                    skipped.append("%s (unsafe path)" % m.filename)
+                    continue
+                dest = _unique_path(dest)
+                try:
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with z.open(m) as src, open(dest, "wb") as out:
+                        shutil.copyfileobj(src, out)
+                    done += 1
+                except (OSError, RuntimeError, zipfile.BadZipFile) as e:
+                    skipped.append("%s: %s" % (m.filename, e))
+        text = "Unpacked %d of %d file(s) into %s." % (done, len(members), target)
+        if skipped:
+            text += " Problems: " + " | ".join(skipped[:20])
+        return text
+
     def tool_undo_last_change(self, a=None):
         batch = self.undo.peek()
         if not batch:
@@ -811,7 +932,7 @@ class ToolRunner(object):
         if len(command) > shell.MAX_COMMAND_CHARS:
             raise ToolError("The command is too long. Please split it into smaller steps.")
         kind = "cmd" if str(a.get("shell") or "").lower() == "cmd" else "powershell"
-        why = shell.blocked_reason(command)
+        why = None if self.cfg["safety"].get("allow_all_commands") else shell.blocked_reason(command)
         if why:
             raise ToolError("Blocked for safety: commands are not allowed to do %s. Use the dedicated tools "
                             "(for deleting: recycle_items) or tell the user this cannot be done here." % why)

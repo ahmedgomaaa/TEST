@@ -19,7 +19,7 @@ SetCompressor /SOLID lzma
 
 !define APPNAME "المساعد"
 !define REGNAME "DadHelper"
-!define VERSION "2.2.0"
+!define VERSION "2.3.0"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${REGNAME}"
 !define RESUME_TASK "HelperSetupResume"
 !define RESUME_LINK "كمّل تثبيت المساعد"
@@ -37,7 +37,7 @@ BrandingText " "
 ShowInstDetails show
 ShowUninstDetails show
 
-VIProductVersion "2.2.0.0"
+VIProductVersion "2.3.0.0"
 VIAddVersionKey "ProductName" "Helper (Arabic computer assistant)"
 VIAddVersionKey "FileDescription" "Helper setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
@@ -70,6 +70,9 @@ Var hKey
 Var hTo
 Var hFrom
 Var hPass
+Var PSVer
+Var WantPS
+Var hPS
 
 ; ---------------------------------------------------------------- pages
 
@@ -84,6 +87,7 @@ Var hPass
 !define MUI_WELCOMEPAGE_TEXT "البرنامج ده هيثبّت المساعد على الكمبيوتر: شباك محادثة بالعربي يرد على الأسئلة ويساعد في ترتيب الملفات والصور.$\r$\n$\r$\nهيثبّت كل اللي المساعد محتاجه لوحده (بايثون وتحديث ويندوز لو ناقص). التثبيت بياخد حوالي 5 دقايق.$\r$\n$\r$\nدوس التالي عشان تبدأ."
 !insertmacro MUI_PAGE_WELCOME
 Page custom SettingsPage SettingsLeave
+Page custom PowerShellPage PowerShellLeave
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_TITLE "التثبيت خلص"
 !define MUI_FINISHPAGE_TEXT "المساعد اتثبّت. هتلاقي أيقونة اسمها $\"${APPNAME}$\" على سطح المكتب، دوس عليها مرتين عشان تفتحه."
@@ -174,6 +178,19 @@ Function .onInit
     ${GetOptions} $R0 "/EMAIL=" $MailTo
     ${GetOptions} $R0 "/SENDER=" $SmtpUser
     ${GetOptions} $R0 "/APPPASS=" $SmtpPass
+    Call DetectPowerShell
+    ; Interactive installs offer PowerShell 5.1 (ticked); silent ones only install it with /PS51.
+    StrCpy $WantPS 0
+    StrCpy $0 $PSVer 1
+    ${If} $0 != "5"
+    ${AndIfNot} ${Silent}
+        StrCpy $WantPS 1
+    ${EndIf}
+    ClearErrors
+    ${GetOptions} $R0 "/PS51" $0
+    ${IfNot} ${Errors}
+        StrCpy $WantPS 1
+    ${EndIf}
     StrCpy $NoTest 0
     ClearErrors
     ${GetOptions} $R0 "/NOTEST" $0
@@ -414,6 +431,90 @@ Function SettingsLeave
     ${EndIf}
 FunctionEnd
 
+; ---------------------------------------------------------------- PowerShell 5.1 page
+
+Function DetectPowerShell
+    ${If} ${RunningX64}
+        SetRegView 64
+    ${EndIf}
+    ReadRegStr $PSVer HKLM "SOFTWARE\Microsoft\PowerShell\3\PowerShellEngine" "PowerShellVersion"
+    ${If} $PSVer == ""
+        ReadRegStr $PSVer HKLM "SOFTWARE\Microsoft\PowerShell\1\PowerShellEngine" "PowerShellVersion"
+    ${EndIf}
+    SetRegView 32
+    ${Log} "PowerShell version: $PSVer"
+    ${If} $PSVer == ""
+        StrCpy $PSVer "2.0"  ; every Windows 7 has 2.0
+    ${EndIf}
+FunctionEnd
+
+Function PowerShellPage
+    StrCpy $0 $PSVer 1
+    ${If} $0 == "5"
+        Abort  ; already there: no page
+    ${EndIf}
+    !insertmacro MUI_HEADER_TEXT "PowerShell 5.1" "أوامر ويندوز الحديثة للمساعد"
+    nsDialogs::Create 1018
+    Pop $Dlg
+    ${If} $Dlg == error
+        Abort
+    ${EndIf}
+    ${NSD_CreateLabel} 0 0 100% 60u "الويندوز ده عليه PowerShell $PSVer القديم. لو ثبّتنا PowerShell 5.1 المساعد هيقدر يعمل حاجات أكتر على الكمبيوتر (زي ضغط الملفات والأوامر الحديثة).$\r$\n$\r$\nبيتحمّل من موقع مايكروسوفت (حوالي 165 ميجا مع .NET 4.8)، فمحتاج إنترنت ووقت، وبعده الكمبيوتر لازم يعيد التشغيل."
+    Pop $0
+    ${NSD_CreateCheckbox} 0 70u 100% 14u "ثبّت PowerShell 5.1 (مُستحسن)"
+    Pop $hPS
+    ${If} $WantPS == 1
+        ${NSD_Check} $hPS
+    ${EndIf}
+    nsDialogs::Show
+FunctionEnd
+
+Function PowerShellLeave
+    ${NSD_GetState} $hPS $0
+    ${If} $0 == ${BST_CHECKED}
+        StrCpy $WantPS 1
+    ${Else}
+        StrCpy $WantPS 0
+    ${EndIf}
+FunctionEnd
+
+; $R7 = the lines of a UTF-16 result file written by install_helper.py
+Function ReadResult
+    Pop $R6
+    StrCpy $R7 ""
+    ClearErrors
+    FileOpen $R5 $R6 r
+    ${IfNot} ${Errors}
+        result_loop:
+        ClearErrors
+        FileReadUTF16LE $R5 $R4
+        ${IfNot} ${Errors}
+            StrCpy $R7 "$R7$R4"
+            Goto result_loop
+        ${EndIf}
+        FileClose $R5
+    ${EndIf}
+FunctionEnd
+
+Function InstallPowerShell
+    DetailPrint "بحمّل وبثبّت PowerShell 5.1 (ممكن ياخد وقت حسب الإنترنت)..."
+    ${Log} "Installing PowerShell 5.1"
+    Delete "$PLUGINSDIR\ps.txt"
+    nsExec::ExecToLog '"$PyDir\python.exe" -E -s "$INSTDIR\install_helper.py" install-powershell "$PLUGINSDIR\ps.txt" "$TEMP\HelperSetup-ps51"'
+    Pop $0
+    ${Log} "install-powershell: $0"
+    Push "$PLUGINSDIR\ps.txt"
+    Call ReadResult
+    ${If} $0 == 10
+        SetRebootFlag true
+        MessageBox MB_OK|MB_ICONINFORMATION "$R7$\r$\nفي آخر صفحة اختار إعادة تشغيل الكمبيوتر." /SD IDOK
+    ${ElseIf} $0 == 0
+        MessageBox MB_OK|MB_ICONINFORMATION "$R7" /SD IDOK
+    ${Else}
+        MessageBox MB_OK|MB_ICONEXCLAMATION "$R7" /SD IDOK
+    ${EndIf}
+FunctionEnd
+
 ; ---------------------------------------------------------------- install
 
 Section "Main"
@@ -482,6 +583,9 @@ Section "Main"
 
     ${If} $NoTest != 1
         Call TestEverything
+    ${EndIf}
+    ${If} $WantPS == 1
+        Call InstallPowerShell
     ${EndIf}
     ${Log} "Installation finished"
     Call SaveLog

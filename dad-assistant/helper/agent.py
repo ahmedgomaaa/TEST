@@ -13,11 +13,21 @@ import json
 import logging
 
 from . import llm, net, tools, winapi
+from .conversations import Conversation
 from . import strings as S
 
 log = logging.getLogger("assistant.agent")
 
-MAX_HISTORY_CHARS = 350000  # roughly 90k tokens; start fresh after that to keep costs down
+# How much conversation the AI may see.  Claude models read up to 1 million tokens; DeepSeek about 128 000.
+# Near the limit the older part is summarized and the conversation simply goes on.
+DEFAULT_CONTEXT_TOKENS = {"anthropic": 1000000, "openai_compatible": 128000}
+CONTEXT_HEADROOM = 0.85   # summarize when the conversation reaches 85% of the limit
+CHARS_PER_TOKEN = 3.0     # rough estimate when the service does not say
+
+SUMMARY_REQUEST = ("(Note from the app, not from him: this conversation is getting too long to keep in full. "
+                   "Write a summary of everything so far that you will need to continue: what he asked, what you "
+                   "did on the computer (with full paths), what is unfinished, and anything he told you about "
+                   "himself. Plain text, in English, as detailed as needed. Do not use any tools.)")
 
 ACTIVITY = S.ACTIVITY
 
@@ -32,7 +42,7 @@ HOW TO TALK
 - If his request is unclear, ask one simple question. Be warm and encouraging.
 
 DOING THINGS ON THE COMPUTER
-- Prefer the dedicated tools (list_folder, find_files, read_file, create_folder, move_items, recycle_items, open_item, find_duplicate_files, undo_last_change, generate_image). They are safe and reliable on this old computer. Use run_command only when no dedicated tool can do the job (for example disk space, system information, the list of installed programs).
+- Prefer the dedicated tools (list_folder, find_files, read_file, create_folder, move_items, recycle_items, open_item, find_duplicate_files, zip_files, unzip_file, undo_last_change, generate_image). They are safe and reliable on this old computer. Use run_command only when no dedicated tool can do the job (for example disk space, system information, the list of installed programs).
 - Look before you change: list or search first, then act, and act in as few calls as possible (move_items takes many moves at once).
 - The app itself shows him a big Yes/No question before every change. So do NOT ask for permission in the chat for normal requests: just call the tool with a clear, simple "explanation" in Egyptian Arabic.
 - If he answers No, accept it and ask what he would like instead.
@@ -47,8 +57,8 @@ THIS COMPUTER
 - Drives: {drives}
 - Today is {today}.
 
-RULES FOR run_command (this is an old system)
-- PowerShell is version 2.0. Do NOT use anything newer. Not available: Invoke-WebRequest, Invoke-RestMethod, ConvertTo-Json, ConvertFrom-Json, Get-FileHash, Compress-Archive, Expand-Archive, Get-CimInstance (use Get-WmiObject), [pscustomobject] (use New-Object PSObject -Property @{{...}}), [ordered], $PSItem (use $_), Get-ChildItem -File or -Directory (filter with Where-Object {{ -not $_.PSIsContainer }} or {{ $_.PSIsContainer }}), Get-Content -Raw (use [System.IO.File]::ReadAllText), the short Where-Object syntax without braces, property access on whole lists like $files.Name (use ForEach-Object {{ $_.Name }}), .ForEach() and .Where() methods, Get-Clipboard, Set-Clipboard, New-TemporaryFile, Test-NetConnection, Get-Volume, Get-Disk, Out-File -NoNewline.
+RULES FOR run_command
+{powershell}
 - Commands run hidden, without a window or keyboard, with a time limit of {timeout} seconds. Never use anything that waits for input (Read-Host, pause, choice, set /p, prompts) or opens a window. Never use "exit".
 - The output is captured as text and shortened if long: select only the columns you need (Select-Object / Format-Table -AutoSize) and limit long lists (Select-Object -First 50).
 - Deleting (del, rd, Remove-Item), downloading and installing are blocked; use recycle_items to delete.
@@ -60,6 +70,36 @@ PICTURES
 """
 
 
+PS2_RULES = ("- PowerShell is version 2.0 (Windows 7 default). Do NOT use anything newer. Not available: "
+             "Invoke-WebRequest, Invoke-RestMethod, ConvertTo-Json, ConvertFrom-Json, Get-FileHash, Compress-Archive, "
+             "Expand-Archive, Get-CimInstance (use Get-WmiObject), [pscustomobject] (use New-Object PSObject -Property "
+             "@{...}), [ordered], $PSItem (use $_), Get-ChildItem -File or -Directory (filter with Where-Object "
+             "{ -not $_.PSIsContainer } or { $_.PSIsContainer }), Get-Content -Raw (use [System.IO.File]::ReadAllText), "
+             "the short Where-Object syntax without braces, property access on whole lists like $files.Name (use "
+             "ForEach-Object { $_.Name }), .ForEach() and .Where() methods, Get-Clipboard, Set-Clipboard, "
+             "New-TemporaryFile, Test-NetConnection, Get-Volume, Get-Disk, Out-File -NoNewline.\n"
+             "- For zip files use the zip_files / unzip_file tools.")
+
+PS5_RULES = ("- PowerShell is version {version} (Windows Management Framework 5.1): the full modern Windows PowerShell. "
+             "You can use Compress-Archive / Expand-Archive (zip), Invoke-WebRequest, Invoke-RestMethod, ConvertTo-Json, "
+             "ConvertFrom-Json, Get-FileHash, Get-CimInstance, [pscustomobject], [ordered], Get-ChildItem -File/-Directory, "
+             "Get-Content -Raw, Get-Clipboard / Set-Clipboard, classes, and member enumeration.\n"
+             "- Do not use PowerShell 7-only features: ForEach-Object -Parallel, the ternary ?: operator, && and ||, "
+             "?? and ?., or -AsHashtable.")
+
+UNRESTRICTED_RULES = ("- Ahmed has allowed all commands on this computer (no command is blocked). Still: explain what you "
+                      "will do first, and prefer recycle_items over permanent deleting.")
+
+
+def shell_rules(cfg):
+    from . import shell
+    version = shell.powershell_version()
+    rules = PS5_RULES.format(version=version) if version and version >= "5" else PS2_RULES
+    if (cfg.get("safety") or {}).get("allow_all_commands"):
+        rules += "\n" + UNRESTRICTED_RULES
+    return rules
+
+
 def _drives_text():
     parts = []
     for root, kind in winapi.drives():
@@ -69,33 +109,93 @@ def _drives_text():
     return ", ".join(parts) or "unknown"
 
 
-def build_system_prompt(cfg, folders):
+def build_system_prompt(cfg, folders, memory_text="", summary=""):
+    """Built once per conversation (not per message), so the AI service can cache it."""
     folder_lines = "\n".join("- His %s folder: %s" % (k, v) for k, v in folders.items() if k != "Home")
     folder_lines += "\n- His home folder: %s" % folders.get("Home")
-    return SYSTEM_TEMPLATE.format(
+    text = SYSTEM_TEMPLATE.format(
         name=cfg["assistant_name"],
         user=cfg["user_name"] or "the user",
         folders=folder_lines,
         drives=_drives_text(),
         today=datetime.date.today().strftime("%A %d %B %Y"),
         timeout=cfg["safety"]["command_timeout_seconds"],
+        powershell=shell_rules(cfg),
     )
+    if memory_text:
+        text += ("\nWHAT YOU REMEMBER FROM EARLIER CONVERSATIONS (written by you; use it naturally, do not "
+                 "recite it; it may be out of date)\n" + memory_text + "\n")
+    if summary:
+        text += "\nEARLIER IN THIS CONVERSATION (summary, the full text was too long)\n" + summary + "\n"
+    return text
+
+
+def context_limit(cfg):
+    configured = cfg.get("max_context_tokens")
+    try:
+        if configured and int(configured) > 1000:
+            return int(configured)
+    except (TypeError, ValueError):
+        pass
+    return DEFAULT_CONTEXT_TOKENS.get(cfg["provider"], 128000)
 
 
 class Agent(object):
-    def __init__(self, cfg, client, runner, emit, reporter=None):
+    def __init__(self, cfg, client, runner, emit, reporter=None, memory=None):
         """emit(kind, value): kind is 'text', 'activity', 'notice' or 'error'."""
         self.cfg = cfg
         self.client = client
         self.runner = runner
         self.emit = emit
         self.reporter = reporter
-        self.messages = []
-        self.system = build_system_prompt(cfg, runner.folders)
+        self.memory = memory
+        self.limit = context_limit(cfg)
+        self.new_conversation()
 
-    def new_conversation(self):
-        self.messages = []
-        self.system = build_system_prompt(self.cfg, self.runner.folders)
+    @property
+    def messages(self):
+        return self.conv.messages
+
+    @messages.setter
+    def messages(self, value):
+        self.conv.messages = value
+
+    def _build_system(self):
+        memory_text = ""
+        if self.memory is not None:
+            try:
+                memory_text = self.memory.prompt_text()
+            except Exception:
+                log.exception("Could not read the memory")
+        self.system = build_system_prompt(self.cfg, self.runner.folders, memory_text, self.conv.summary)
+
+    def new_conversation(self, conv=None):
+        """Start a new conversation, or continue a saved one."""
+        self.conv = conv or Conversation()
+        self._build_system()
+
+    def _estimated_tokens(self):
+        if self.conv.context_tokens:
+            return self.conv.context_tokens
+        return int((len(json.dumps(self.messages)) + len(self.system)) / CHARS_PER_TOKEN)
+
+    def _continue_with_summary(self, cancel):
+        """The conversation is near the limit: summarize it and go on with the summary instead."""
+        log.info("Conversation at about %d tokens (limit %d); summarizing", self._estimated_tokens(), self.limit)
+        self.emit("activity", S.SUMMARIZING)
+        summary = ""
+        try:
+            request = self.messages + [{"role": "user", "content": [{"type": "text", "text": SUMMARY_REQUEST}]}]
+            reply = self.client.create(self.system, tools.TOOL_DEFS, request, cancel)
+            summary = reply.text()
+        except (net.HttpError, net.NetworkError) as e:
+            log.warning("Summary failed (%s); starting the history fresh", e)
+        old = self.conv.summary
+        self.conv.summary = ((old + "\n\n") if old else "") + (summary or "(The earlier part could not be summarized.)")
+        self.conv.messages = []
+        self.conv.context_tokens = 0
+        self._build_system()
+        self.emit("notice", S.CONVERSATION_CONTINUED)
 
     def _told(self, short=False):
         """Only promise that Ahmed knows if e-mail reports actually work."""
@@ -129,10 +229,8 @@ class Agent(object):
             self.emit("error", S.SOMETHING_WRONG_MY_SIDE + self._told(True))
 
     def _handle(self, user_text, cancel):
-        if self.messages and len(json.dumps(self.messages)) > MAX_HISTORY_CHARS:
-            log.info("Conversation is long; starting a new one.")
-            self.new_conversation()
-            self.emit("notice", S.CONVERSATION_RESTARTED)
+        if self.messages and self._estimated_tokens() > self.limit * CONTEXT_HEADROOM:
+            self._continue_with_summary(cancel)
         log.info("USER: %s", user_text[:2000])
         self.messages.append({"role": "user", "content": [{"type": "text", "text": user_text}]})
         retried_fresh = False
@@ -146,7 +244,8 @@ class Agent(object):
                     # Most likely a damaged conversation: start fresh with just this message.
                     log.warning("400 from API, retrying with a fresh conversation: %s", e)
                     retried_fresh = True
-                    self.new_conversation()
+                    self.conv.messages = []
+                    self.conv.context_tokens = 0
                     self.messages.append({"role": "user", "content": [{"type": "text", "text": user_text}]})
                     continue
                 self._api_error(e)
@@ -165,6 +264,9 @@ class Agent(object):
                 return
 
             self.messages.append({"role": "assistant", "content": response.content})
+            size = response.context_tokens()
+            if size:
+                self.conv.context_tokens = size
             text = response.text()
             if text:
                 log.info("ASSISTANT: %s", text[:2000])

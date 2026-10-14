@@ -14,7 +14,8 @@ import traceback
 from tkinter import scrolledtext
 
 from . import agent as agent_mod
-from . import llm, textbox, textutil, tools, winapi
+from . import conversations, llm, textbox, textutil, tools, winapi
+from . import memory as memory_mod
 from . import strings as S
 
 log = logging.getLogger("assistant.ui")
@@ -27,6 +28,8 @@ NOTICE_COLOR = "#6B6B6B"
 ERROR_COLOR = "#A61B1B"
 GREEN = "#2E7D32"
 FONT = "Tahoma"  # clear Arabic letters on every Windows 7 laptop
+SIDE_BG = "#E9E4D8"
+REPLAY_LIMIT = 400  # entries shown again when an old conversation is opened
 
 
 def _center(win, root):
@@ -112,19 +115,28 @@ class App(object):
         self.root = tk.Tk()
         self.root.title(cfg["assistant_name"])
         self.root.configure(bg=BG)
-        self.root.geometry("980x720")
-        self.root.minsize(640, 480)
+        self.root.geometry("1240x760")
+        self.root.minsize(800, 520)
         self.root.report_callback_exception = self._tk_error
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self._build()
 
         self.runner = tools.ToolRunner(cfg, self._confirm_from_worker, self._notify_from_worker)
+        self.store = conversations.Store()
+        self.memory = memory_mod.Memory()
+        self.memory.listeners.append(lambda: self.events.put(("memory_changed", None)))
+        self.memworker = None
         self.agent = None
         try:
             client = llm.make_llm(cfg)
-            self.agent = agent_mod.Agent(cfg, client, self.runner, self._emit, reporter)
+            self.agent = agent_mod.Agent(cfg, client, self.runner, self._emit, reporter, memory=self.memory)
+            self.memworker = memory_mod.MemoryWorker(
+                cfg, self.store, self.memory, on_title=lambda _id, _t: self.events.put(("refresh_list", None)))
+            self.memworker.start()
         except llm.ConfigError as e:
             config_problems = list(config_problems) + [str(e)]
+        self._refresh_list()
+        self._refresh_memory_count()
         if config_problems:
             log.error("Configuration problems: %s", config_problems)
             reporter.report_error("Configuration problem", "\n".join(config_problems))
@@ -135,8 +147,11 @@ class App(object):
 
     def _build(self):
         s = self.size
-        # Everything is laid out right to left, like an Arabic page.
-        top = tk.Frame(self.root, bg=BG)
+        # Everything is laid out right to left, like an Arabic page: the side panel is on the right.
+        self._build_side()
+        main = tk.Frame(self.root, bg=BG)
+        main.pack(side="right", fill="both", expand=True)
+        top = tk.Frame(main, bg=BG)
         top.pack(fill="x", padx=16, pady=(12, 4))
         tk.Label(top, text=textutil.rtl(self.cfg["assistant_name"]), font=(FONT, s + 8, "bold"),
                  bg=BG).pack(side="right")
@@ -144,16 +159,16 @@ class App(object):
         tk.Button(top, text="A+", font=(FONT, s - 2), command=lambda: self._zoom(1)).pack(side="left", padx=4)
         tk.Label(top, text=textutil.rtl(S.TEXT_SIZE), font=(FONT, s - 2), bg=BG).pack(side="left", padx=4)
 
-        self.chat = scrolledtext.ScrolledText(self.root, wrap="word", font=(FONT, s), bg=CHAT_BG, relief="flat",
+        self.chat = scrolledtext.ScrolledText(main, wrap="word", font=(FONT, s), bg=CHAT_BG, relief="flat",
                                               padx=14, pady=10, state="disabled", cursor="arrow", height=10,
                                               width=20)
         self.chat.pack(fill="both", expand=True, padx=16, pady=6)
         self._style_tags()
 
-        self.status = tk.Label(self.root, text="", font=(FONT, s - 1, "italic"), fg=NOTICE_COLOR, bg=BG, anchor="e")
+        self.status = tk.Label(main, text="", font=(FONT, s - 1, "italic"), fg=NOTICE_COLOR, bg=BG, anchor="e")
         self.status.pack(fill="x", padx=18)
 
-        bottom = tk.Frame(self.root, bg=BG)
+        bottom = tk.Frame(main, bg=BG)
         bottom.pack(fill="x", padx=16, pady=(4, 6))
         # Pack the button first so the text box can never squeeze it off the screen.
         self.send_btn = tk.Button(bottom, text=textutil.rtl(S.SEND), font=(FONT, s + 4, "bold"), bg=GREEN,
@@ -167,7 +182,7 @@ class App(object):
         self.root.bind("<FocusIn>", lambda e: self.root.after_idle(self.entry.focus) if e.widget is self.root
                        else None)
 
-        row = tk.Frame(self.root, bg=BG)
+        row = tk.Frame(main, bg=BG)
         row.pack(fill="x", padx=16, pady=(0, 12))
         self.stop_btn = tk.Button(row, text=textutil.rtl(S.STOP), font=(FONT, s), padx=12, state="disabled",
                                   command=self._stop)
@@ -178,6 +193,191 @@ class App(object):
         tk.Button(row, text=textutil.rtl(S.ASK_AHMED), font=(FONT, s), padx=12,
                   command=self._help).pack(side="left")
         self.root.after(200, self.entry.focus)
+
+    def _build_side(self):
+        s = self.size
+        side = self.side = tk.Frame(self.root, bg=SIDE_BG, width=290)
+        side.pack(side="right", fill="y")
+        side.pack_propagate(False)
+        tk.Label(side, text=textutil.rtl(S.CONVERSATIONS), font=(FONT, s, "bold"), bg=SIDE_BG,
+                 anchor="e").pack(fill="x", padx=12, pady=(14, 4))
+        lst = tk.Frame(side, bg=SIDE_BG)
+        lst.pack(fill="both", expand=True, padx=(8, 12))
+        scroll = tk.Scrollbar(lst)
+        scroll.pack(side="left", fill="y")
+        self.conv_list = tk.Listbox(lst, font=(FONT, s - 2), justify="right", activestyle="none",
+                                    selectbackground="#C8DCC9", selectforeground="black", exportselection=False,
+                                    yscrollcommand=scroll.set, relief="flat", height=10)
+        self.conv_list.pack(side="right", fill="both", expand=True)
+        scroll.configure(command=self.conv_list.yview)
+        self.conv_list.bind("<Double-Button-1>", lambda e: self._open_selected())
+        self.conv_list.bind("<Return>", lambda e: self._open_selected())
+        self._conv_ids = []
+        buttons = tk.Frame(side, bg=SIDE_BG)
+        buttons.pack(fill="x", padx=12, pady=6)
+        for label, command in ((S.OPEN, self._open_selected), (S.RENAME, self._rename_selected),
+                               (S.DELETE, self._delete_selected)):
+            tk.Button(buttons, text=textutil.rtl(label), font=(FONT, s - 3), command=command).pack(
+                side="right", padx=2, expand=True, fill="x")
+        self.memory_btn = tk.Button(side, text=textutil.rtl(S.MEMORY), font=(FONT, s - 1), command=self._show_memory)
+        self.memory_btn.pack(fill="x", padx=12, pady=(6, 14))
+
+    def _refresh_list(self):
+        current = self.agent.conv.id if self.agent is not None else None
+        self.conv_list.delete(0, "end")
+        self._conv_ids = []
+        for conv_id, title, _updated in self.store.list():
+            self.conv_list.insert("end", textutil.rtl(title or S.NEW_TITLE))
+            self._conv_ids.append(conv_id)
+            if conv_id == current:
+                self.conv_list.selection_set("end")
+
+    def _refresh_memory_count(self):
+        n = len(self.memory.items())
+        self.memory_btn.configure(text=textutil.rtl("%s (%d)" % (S.MEMORY, n)))
+
+    def _selected_id(self):
+        sel = self.conv_list.curselection()
+        return self._conv_ids[sel[0]] if sel and sel[0] < len(self._conv_ids) else None
+
+    def _save_current(self):
+        if self.agent is not None and self.store.save(self.agent.conv):
+            return self.agent.conv.id
+        return None
+
+    def _open_selected(self):
+        conv_id = self._selected_id()
+        if not conv_id or self.agent is None:
+            return
+        if self.busy:
+            self._set_status(S.WAIT_FINISH)
+            return
+        if conv_id == self.agent.conv.id:
+            return
+        old = self._save_current()
+        if old and self.memworker:
+            self.memworker.now(old)
+        conv = self.store.load(conv_id)
+        if conv is None:
+            self._refresh_list()
+            return
+        self.agent.new_conversation(conv)
+        self._clear_chat()
+        self._greet([])
+        shown = conv.display[-REPLAY_LIMIT:]
+        for kind, text, who in shown:
+            if kind == "image":
+                self._show_image(text)
+            else:
+                self._write(text, kind, who, record=False)
+        self._refresh_list()
+        self.entry.focus()
+
+    def _rename_selected(self):
+        conv_id = self._selected_id()
+        if not conv_id:
+            return
+        win = tk.Toplevel(self.root)
+        win.title(S.RENAME)
+        win.configure(bg=BG)
+        win.transient(self.root)
+        s = self.size
+        tk.Label(win, text=textutil.rtl(S.RENAME_PROMPT), font=(FONT, s, "bold"), bg=BG).pack(
+            padx=20, pady=(16, 6), anchor="e")
+        holder = tk.Frame(win, bg=BG, width=460, height=44)
+        holder.pack(padx=20, fill="x")
+        holder.pack_propagate(False)
+        box = textbox.make(holder, (FONT, s), height=1)
+        box.pack(fill="both", expand=True)
+        box.set(self.store.meta(conv_id).get("title") or "")
+
+        def save():
+            title = box.get()
+            win.destroy()
+            if title:
+                self.store.rename(conv_id, title)
+                self._refresh_list()
+        row = tk.Frame(win, bg=BG)
+        row.pack(padx=20, pady=14, fill="x")
+        tk.Button(row, text=textutil.rtl(S.SAVE), font=(FONT, s, "bold"), bg=GREEN, fg="white", padx=16,
+                  command=save).pack(side="right")
+        tk.Button(row, text=textutil.rtl(S.CANCEL), font=(FONT, s), padx=16, command=win.destroy).pack(
+            side="right", padx=10)
+        _center(win, self.root)
+        win.after(200, box.focus)
+
+    def _delete_selected(self):
+        conv_id = self._selected_id()
+        if not conv_id:
+            return
+        if self.busy and self.agent is not None and conv_id == self.agent.conv.id:
+            self._set_status(S.WAIT_FINISH)
+            return
+        if not BigDialog(self.root, self.size, S.DELETE_CONFIRM, [S.DELETE_DETAIL]).wait():
+            return
+        self.store.delete(conv_id)
+        if self.agent is not None and conv_id == self.agent.conv.id:
+            self.agent.new_conversation()
+            self._clear_chat()
+            self._greet([])
+        self._refresh_list()
+
+    def _show_memory(self):
+        win = tk.Toplevel(self.root)
+        win.title(S.MEMORY_TITLE)
+        win.configure(bg=BG)
+        win.transient(self.root)
+        win.geometry("700x520")
+        s = self.size
+        hfont = (FONT, s - 1)
+        measure = tkfont.Font(root=self.root, font=hfont).measure
+        tk.Label(win, text="\n".join(textutil.rtl_visual_lines(S.MEMORY_HELP, 640, measure)), font=hfont, bg=BG,
+                 justify="right").pack(padx=16, pady=(14, 6), anchor="e")
+        frame = tk.Frame(win, bg=BG)
+        frame.pack(fill="both", expand=True, padx=16)
+        scroll = tk.Scrollbar(frame)
+        scroll.pack(side="left", fill="y")
+        box = tk.Listbox(frame, font=(FONT, s - 1), justify="right", selectmode="extended",
+                         yscrollcommand=scroll.set, activestyle="none", exportselection=False)
+        box.pack(side="right", fill="both", expand=True)
+        scroll.configure(command=box.yview)
+        ids = []
+
+        def fill():
+            box.delete(0, "end")
+            del ids[:]
+            items = self.memory.items()
+            if not items:
+                box.insert("end", textutil.rtl(S.MEMORY_EMPTY))
+            for item in items:
+                box.insert("end", textutil.rtl(item["text"]))
+                ids.append(item["id"])
+
+        def delete_selected():
+            chosen = [ids[i] for i in box.curselection() if i < len(ids)]
+            if chosen:
+                self.memory.remove(chosen)
+                fill()
+
+        def delete_all():
+            if ids and BigDialog(win, self.size, S.DELETE_ALL_CONFIRM).wait():
+                self.memory.clear()
+                fill()
+        fill()
+        row = tk.Frame(win, bg=BG)
+        row.pack(fill="x", padx=16, pady=12)
+        tk.Button(row, text=textutil.rtl(S.DELETE_SELECTED), font=(FONT, s - 1), command=delete_selected).pack(
+            side="right")
+        tk.Button(row, text=textutil.rtl(S.DELETE_ALL), font=(FONT, s - 1), command=delete_all).pack(
+            side="right", padx=8)
+        tk.Button(row, text=textutil.rtl(S.CLOSE), font=(FONT, s - 1), command=win.destroy).pack(side="left")
+        _center(win, self.root)
+
+    def _clear_chat(self):
+        self.chat.configure(state="normal")
+        self.chat.delete("1.0", "end")
+        self.chat.configure(state="disabled")
+        self.images = []
 
     def _style_tags(self):
         s = self.size
@@ -202,7 +402,9 @@ class App(object):
 
     # ------------------------------------------------------------------ chat output
 
-    def _write(self, text, tag, who=None):
+    def _write(self, text, tag, who=None, record=True):
+        if record and tag != "activity" and self.agent is not None:
+            self.agent.conv.add_display(tag, text, who)
         text = textutil.for_tk(text)
         self.chat.configure(state="normal")
         try:
@@ -254,10 +456,10 @@ class App(object):
     def _greet(self, problems):
         name = self.cfg["user_name"]
         hello = S.GREETING.format(name=S.GREETING_NAME.format(name=name) if name else "", assistant=self.cfg["assistant_name"])
-        self._write(hello + "\n" + S.GREETING_HOW, "assistant", self.cfg["assistant_name"])
+        self._write(hello + "\n" + S.GREETING_HOW, "assistant", self.cfg["assistant_name"], record=False)
         if problems or self.agent is None:
             told = S.AHMED_WAS_TOLD if self.reporter.configured() else S.TELL_AHMED_TO_FINISH
-            self._write(S.NOT_SET_UP + " " + told, "error")
+            self._write(S.NOT_SET_UP + " " + told, "error", record=False)
 
     # ------------------------------------------------------------------ input
 
@@ -310,11 +512,13 @@ class App(object):
             self._set_status(S.STATUS_PRESS_STOP_FIRST)
             return
         if self.agent is not None:
+            old = self._save_current()
+            if old and self.memworker:
+                self.memworker.now(old)  # remember what was worth keeping from it
             self.agent.new_conversation()
-        self.chat.configure(state="normal")
-        self.chat.delete("1.0", "end")
-        self.chat.configure(state="disabled")
+        self._clear_chat()
         self._greet([])
+        self._refresh_list()
 
     def _undo(self):
         if self.busy:
@@ -437,7 +641,13 @@ class App(object):
         elif kind == "error":
             self._write(value, "error")
         elif kind == "image":
+            if self.agent is not None:
+                self.agent.conv.add_display("image", value)
             self._show_image(value)
+        elif kind == "refresh_list":
+            self._refresh_list()
+        elif kind == "memory_changed":
+            self._refresh_memory_count()
         elif kind == "confirm":
             question, details, holder, done = value
             try:
@@ -447,6 +657,11 @@ class App(object):
         elif kind == "done":
             self._set_busy(False)
             self.entry.focus()
+            saved = self._save_current()
+            if saved:
+                self._refresh_list()
+                if self.memworker:
+                    self.memworker.soon(saved)
 
     # ------------------------------------------------------------------ errors and closing
 
@@ -467,6 +682,10 @@ class App(object):
                              no=S.NO_KEEP_WORKING).wait():
                 return
             self.cancel.set()
+        try:
+            self._save_current()
+        except Exception:
+            log.exception("Could not save the conversation while closing")
         self.root.destroy()
 
     def run(self):

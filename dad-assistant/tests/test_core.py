@@ -291,8 +291,22 @@ class LLMTests(unittest.TestCase):
         self.assertEqual(resp.text(), "hello")
         self.assertEqual(len(sent), 2)
         self.assertNotIn("anthropic-beta", sent[1][1])
-        self.assertEqual(sent[0][0]["system"][0]["cache_control"], {"type": "ephemeral"})
+        self.assertEqual(sent[0][0]["system"][0]["cache_control"], {"type": "ephemeral", "ttl": "1h"})
         self.assertNotIn("tools", sent[0][0])
+
+    def test_rejected_cache_lifetime_falls_back(self):
+        client = llm.AnthropicLLM({"api_key": "k", "model": "m", "use_fallbacks": False})
+        sent = []
+
+        def fake_post(url, payload, headers, **kw):
+            sent.append(payload)
+            if payload["cache_control"].get("ttl"):
+                raise net.HttpError(400, '{"error": {"message": "cache_control.ttl: not supported"}}')
+            return {"content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn"}
+        with mock.patch.object(net, "post_json", fake_post):
+            self.assertEqual(client.create("sys", [], [{"role": "user", "content": "hi"}]).text(), "ok")
+        self.assertEqual(sent[-1]["cache_control"], {"type": "ephemeral"})
+        self.assertEqual(sent[-1]["system"][0]["cache_control"], {"type": "ephemeral"})
 
 
 class ToolTests(HomeDirTest):
@@ -403,6 +417,50 @@ class ToolTests(HomeDirTest):
         out, err = self.runner.run("generate_image", {"prompt": "a cat"})
         self.assertTrue(err)
         self.assertIn("not set up", out)
+
+
+class ZipToolTests(HomeDirTest):
+    def test_zip_and_unzip_round_trip_without_overwriting(self):
+        desk = os.path.join(self.home, "Desktop")
+        os.makedirs(os.path.join(desk, "Photos", "Trip"))
+        for name, data in (("Photos/a.txt", "one"), ("Photos/Trip/b.txt", "two")):
+            with open(os.path.join(desk, *name.split("/")), "w") as f:
+                f.write(data)
+        out, err = self.runner.run("zip_files", {"paths": [os.path.join(desk, "Photos")],
+                                                 "zip_path": os.path.join(desk, "photos"), "explanation": "zip"})
+        self.assertFalse(err, out)
+        self.assertTrue(os.path.isfile(os.path.join(desk, "photos.zip")))
+        out, err = self.runner.run("unzip_file", {"zip_path": os.path.join(desk, "photos.zip"), "explanation": "x"})
+        self.assertFalse(err, out)
+        with open(os.path.join(desk, "photos", "Photos", "Trip", "b.txt")) as f:
+            self.assertEqual(f.read(), "two")
+        # Unpacking again into the same folder keeps the old files and adds numbered copies.
+        out, err = self.runner.run("unzip_file", {"zip_path": os.path.join(desk, "photos.zip"),
+                                                  "folder": os.path.join(desk, "photos"), "explanation": "x"})
+        self.assertFalse(err, out)
+        self.assertTrue(os.path.exists(os.path.join(desk, "photos", "Photos", "a (2).txt")))
+
+    def test_unzip_refuses_paths_outside_the_folder(self):
+        desk = os.path.join(self.home, "Desktop")
+        evil = os.path.join(desk, "evil.zip")
+        with zipfile.ZipFile(evil, "w") as z:
+            z.writestr("../../outside.txt", "x")
+            z.writestr("ok.txt", "fine")
+        out, err = self.runner.run("unzip_file", {"zip_path": evil, "explanation": "x"})
+        self.assertFalse(err, out)
+        self.assertFalse(os.path.exists(os.path.join(self.home, "outside.txt")))
+        self.assertTrue(os.path.exists(os.path.join(desk, "evil", "outside.txt")))  # kept inside, ".." dropped
+        self.assertTrue(os.path.exists(os.path.join(desk, "evil", "ok.txt")))
+
+    def test_zip_said_no(self):
+        desk = os.path.join(self.home, "Desktop")
+        with open(os.path.join(desk, "a.txt"), "w") as f:
+            f.write("x")
+        self.answers = [False]
+        out, _err = self.runner.run("zip_files", {"paths": [os.path.join(desk, "a.txt")],
+                                                  "zip_path": os.path.join(desk, "a.zip"), "explanation": "x"})
+        self.assertIn("NO", out)
+        self.assertFalse(os.path.exists(os.path.join(desk, "a.zip")))
 
 
 class FakeClient(object):

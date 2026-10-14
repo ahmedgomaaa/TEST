@@ -44,10 +44,21 @@
 
   "safety": {
     "confirm_changes": true,
+    "_allow_all_commands_help": "true = the helper may run ANY command (deleting, installing, registry...). Changes still ask Yes/No first. Keep false for Dad unless you need it.",
+    "allow_all_commands": false,
     "command_timeout_seconds": 120
   },
 
   "max_steps_per_request": 30,
+
+  "_context_help": "How much conversation the AI keeps in full, in tokens. 0 = the most the service allows (1 000 000 for Claude, 128 000 for DeepSeek). Long conversations are cached, so re-reading them costs about a tenth.",
+  "max_context_tokens": 0,
+
+  "_memory_help": "The helper remembers useful things from all conversations by itself (shown in the side panel).",
+  "memory": {
+    "enabled": true,
+    "effort": "low"
+  },
 
   "_updates_help": "At every start the helper checks this file on GitHub and installs newer versions by itself (settings are kept). Set enabled to false to stop that.",
   "updates": {
