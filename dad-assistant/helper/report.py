@@ -27,6 +27,16 @@ ERROR_REPORT_MIN_INTERVAL = 20 * 60  # at most one automatic error e-mail every 
 MAX_OUTBOX = 20
 
 
+def _windows_version():
+    try:
+        v = sys.getwindowsversion()
+        names = {(6, 1): "Windows 7", (6, 2): "Windows 8", (6, 3): "Windows 8.1", (10, 0): "Windows 10/11"}
+        return "%s (%d.%d build %d %s)" % (names.get((v.major, v.minor), "Windows"), v.major, v.minor, v.build,
+                                           v.service_pack)
+    except AttributeError:
+        return platform.platform()
+
+
 class Reporter(object):
     def __init__(self, cfg):
         self.settings = cfg["email_reports"]
@@ -55,13 +65,13 @@ class Reporter(object):
             "Time on the laptop: %s" % datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "App version: %s" % __version__,
             "Python: %s (%s)" % (sys.version.split()[0], platform.architecture()[0]),
-            "Windows: %s" % platform.platform(),
+            "Windows: %s" % _windows_version(),
             "Data folder: %s" % paths.DATA_DIR,
         ]
         msg.set_content("\n".join(info))
         if attach_log:
-            msg.add_attachment(logs.tail().encode("utf-8"), maintype="text", subtype="plain",
-                               filename="assistant-log.txt")
+            # Attach as text so the charset (UTF-8) is declared and Arabic file names stay readable.
+            msg.add_attachment(logs.tail(), subtype="plain", charset="utf-8", filename="assistant-log.txt")
         return msg
 
     # ------------------------------------------------------------------ sending
@@ -69,7 +79,7 @@ class Reporter(object):
     def _smtp_send(self, msg):
         s = self.settings
         host, port = s.get("smtp_host") or "smtp.gmail.com", int(s.get("smtp_port") or 465)
-        if port == 465:
+        if port not in (25, 587):  # 465 and others: TLS from the start (like Gmail on 465)
             server = smtplib.SMTP_SSL(host, port, timeout=40, context=net.ssl_context())
         else:
             server = smtplib.SMTP(host, port, timeout=40)

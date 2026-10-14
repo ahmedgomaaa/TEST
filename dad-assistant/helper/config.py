@@ -15,12 +15,14 @@ DEFAULTS = {
     "assistant_name": "Helper",
     "user_name": "",
     "font_size": 15,
+    "arabic_word_order_fix": True,
     "provider": "anthropic",
     "anthropic": {
         "api_key": "",
         "model": "claude-opus-5-5",
         "effort": "medium",
         "use_fallbacks": True,
+        "base_url": "https://api.anthropic.com",
     },
     "openai_compatible": {
         "api_key": "",

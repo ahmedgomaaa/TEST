@@ -34,3 +34,25 @@ def human_size(num):
             return ("%d %s" % (num, unit)) if unit == "bytes" else ("%.1f %s" % (num, unit))
         num /= 1024.0
     return "%.1f GB" % num
+
+
+def rtl_visual_lines(paragraph, max_width, measure):
+    """Lay out a right-to-left paragraph for Tk.
+
+    Tk 8.6 draws the words of a line from left to right, so Arabic sentences come out in reverse word
+    order (each word itself is shaped correctly).  We wrap the paragraph ourselves to `max_width`
+    pixels (using `measure(text) -> pixels`) and reverse the word order of every line.
+    """
+    words = paragraph.split()
+    if not words:
+        return [paragraph]
+    lines, current = [], []
+    for word in words:
+        candidate = current + [word]
+        if current and measure(" ".join(candidate)) > max_width:
+            lines.append(current)
+            current = [word]
+        else:
+            current = candidate
+    lines.append(current)
+    return [" ".join(reversed(line)) for line in lines]

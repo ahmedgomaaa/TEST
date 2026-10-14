@@ -4,6 +4,8 @@
   "assistant_name": "Helper",
   "user_name": "",
   "font_size": 15,
+  "_arabic_help": "Arabic is laid out right-to-left by the app. If Arabic words look reversed on this laptop, set this to false.",
+  "arabic_word_order_fix": true,
 
   "_provider_help": "\"anthropic\" (Claude, recommended) or \"openai_compatible\" (DeepSeek, OpenRouter, ...)",
   "provider": "anthropic",

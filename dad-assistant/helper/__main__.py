@@ -1,17 +1,36 @@
 """Start the assistant window:  pythonw -m helper  (normally via "Start Assistant.pyw")."""
 
+import faulthandler
 import logging
 import os
 import sys
 import threading
+import time
 import traceback
+
+
+def _crash_tail(path, max_chars=4000):
+    try:
+        with open(path, "r", errors="replace") as f:
+            return f.read()[-max_chars:] or "(empty)"
+    except OSError:
+        return "(none)"
 
 
 def main():
     from . import config, logs, paths, report, winapi
 
     logs.setup()
+    winapi.disable_crash_dialogs()
     log = logging.getLogger("assistant")
+    try:
+        # Native crashes (inside Tk or Windows) leave a Python stack trace here for Ahmed.
+        crash_file = open(paths.CRASH_FILE, "a")
+        crash_file.write("\n=== %s ===\n" % time.strftime("%Y-%m-%d %H:%M:%S"))
+        crash_file.flush()
+        faulthandler.enable(crash_file)
+    except (OSError, RuntimeError):
+        pass
     cfg, problems = config.load()
     logs.set_secrets(config.secrets(cfg))
     log.info("=== Starting (Python %s, %s) ===", sys.version.split()[0], sys.platform)
@@ -43,7 +62,8 @@ def main():
     # If the last run did not close normally, tell Ahmed.
     if os.path.exists(paths.RUNNING_FLAG):
         reporter.send_async("The assistant closed unexpectedly last time",
-                            "The previous session did not shut down normally. The log is attached.")
+                            "The previous session did not shut down normally. The log is attached.\n\n"
+                            "Last part of crash.log:\n" + _crash_tail(paths.CRASH_FILE))
     try:
         with open(paths.RUNNING_FLAG, "w") as f:
             f.write(str(os.getpid()))

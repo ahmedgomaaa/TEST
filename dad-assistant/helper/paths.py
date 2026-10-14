@@ -40,6 +40,7 @@ TEMP_DIR = os.path.join(DATA_DIR, "temp")
 UNDO_PATH = os.path.join(DATA_DIR, "undo.json")
 RUNNING_FLAG = os.path.join(DATA_DIR, "running.flag")
 LOG_FILE = os.path.join(LOG_DIR, "assistant.log")
+CRASH_FILE = os.path.join(LOG_DIR, "crash.log")
 
 
 def ensure_dirs():

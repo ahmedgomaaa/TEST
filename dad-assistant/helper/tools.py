@@ -83,8 +83,8 @@ TOOL_DEFS = [
     {
         "name": "move_items",
         "description": "Move and/or rename files and folders, many at once. Use this for organizing, sorting and "
-                       "renaming. If 'to' is an existing folder the item is moved into it; otherwise 'to' is the "
-                       "new full path (new name). Missing destination folders are created. Existing files are "
+                       "renaming. To move into a folder, give the folder path in 'to' (it is created if missing). "
+                       "To rename, give the full new path including the file extension. Missing folders are created. Existing files are "
                        "never overwritten (a number is added to the name). Can be undone.",
         "input_schema": {
             "type": "object",
@@ -323,7 +323,12 @@ class ToolRunner(object):
         self.folders = winapi.known_folders()
         self.home = self.folders["Home"]
         self.protected = [_norm(p) for p in winapi.system_dirs()] + [_norm(paths.APP_DIR), _norm(paths.DATA_DIR)]
+        # The main folders as Windows reports them AND under the profile folder, in case they differ
+        # (folder redirection, roaming profiles).
+        standard = ["Desktop", "Documents", "My Documents", "Pictures", "Music", "Videos", "Downloads",
+                    "Favorites", "Contacts", "Links", "Saved Games", "Searches", "OneDrive"]
         self.untouchable = set(_norm(p) for p in self.folders.values())
+        self.untouchable.update(_norm(os.path.join(self.home, name)) for name in standard)
         self.undo = UndoJournal(undo_path or paths.UNDO_PATH)
 
     # ------------------------------------------------------------------ plumbing
@@ -615,16 +620,22 @@ class ToolRunner(object):
         if len(moves) > 3000:
             raise ToolError("That is too many items at once (maximum 3000). Please do it in smaller groups.")
         plan, problems, planned_dests = [], [], set()
+        target_counts = {}
+        for m in moves:
+            if isinstance(m, dict) and isinstance(m.get("to"), str):
+                key = _norm(m["to"].strip().strip('"').rstrip("\\/") or m["to"])
+                target_counts[key] = target_counts.get(key, 0) + 1
         for m in moves:
             if not isinstance(m, dict):
                 continue
             try:
                 src = self.resolve(m.get("from"), "source path")
-                dst = self.resolve(m.get("to"), "destination")
+                raw_to = str(m.get("to") or "").strip().strip('"')
+                dst = self.resolve(raw_to, "destination")
                 if not os.path.lexists(src):
                     raise ToolError("%s does not exist." % src)
                 self.check_changeable(src)
-                if os.path.isdir(dst) and _norm(dst) != _norm(src):
+                if _norm(dst) != _norm(src) and self._is_folder_target(src, dst, raw_to, target_counts):
                     dst = os.path.join(dst, os.path.basename(src))
                 self.check_changeable(dst)
                 if _norm(dst) == _norm(src):
@@ -671,6 +682,20 @@ class ToolRunner(object):
             result.append("Problems: " + " | ".join(failed[:20]))
         result.append("This can be undone with undo_last_change.")
         return "\n".join(result)
+
+    @staticmethod
+    def _is_folder_target(src, dst, raw_to, target_counts):
+        """Is 'to' a folder to move into (rather than a new name)?  Errs on the side of "folder"."""
+        if os.path.isdir(dst):
+            return True
+        if os.path.lexists(dst):
+            return False
+        if raw_to.endswith(("\\", "/")):
+            return True
+        if target_counts.get(_norm(dst), 0) > 1:
+            return True  # several items going to the same place: it must be a folder
+        src_ext = os.path.splitext(src)[1]
+        return bool(src_ext) and os.path.isfile(src) and not os.path.splitext(dst)[1]
 
     def tool_recycle_items(self, a):
         raw = a.get("paths")
@@ -745,9 +770,9 @@ class ToolRunner(object):
         batch = self.undo.peek()
         if not batch:
             return "There is nothing to undo."
-        if not self._confirm("Undo the last change? (%s, %s)" % (str(batch.get("description") or "").rstrip(". "),
-                                                                  batch.get("time")),
-                             ["Things will be put back where they were."]):
+        if not self._confirm("Undo the last change?",
+                             [str(batch.get("description") or "").rstrip(". "),
+                              "Done at %s. Things will be put back where they were." % batch.get("time")]):
             return "The user said NO. Nothing was undone."
         self.undo.pop()
         restored, problems = 0, []
@@ -771,8 +796,7 @@ class ToolRunner(object):
                         pass
             except (OSError, shutil.Error, KeyError) as e:
                 problems.append(str(e))
-        text = "I undid the last change (%s). %d items were put back where they were." % (
-            str(batch.get("description") or "").rstrip(". "), restored)
+        text = "I undid the last change: %d items were put back where they were." % restored
         if problems:
             text += " Problems: " + " | ".join(problems[:20])
         return text

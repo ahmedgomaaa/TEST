@@ -107,6 +107,16 @@ class Agent(object):
         self.messages = []
         self.system = build_system_prompt(self.cfg, self.runner.folders)
 
+    def _told(self, short=False):
+        """Only promise that Ahmed knows if e-mail reports actually work."""
+        try:
+            configured = self.reporter is not None and self.reporter.configured()
+        except Exception:
+            configured = False
+        if configured:
+            return " (Ahmed has been sent a report.)" if short else " Ahmed has been sent a message."
+        return "" if short else " Please tell Ahmed."
+
     def _report(self, summary, details=""):
         log.error("%s %s", summary, details)
         if self.reporter is not None:
@@ -126,8 +136,7 @@ class Agent(object):
             log.exception("Unexpected error while handling a message")
             self._close_open_tool_calls("An internal error happened.")
             self._report("Unexpected error: %s" % e)
-            self.emit("error", "Sorry, something went wrong on my side. Please try again. "
-                               "(Ahmed has been sent a report.)")
+            self.emit("error", "Sorry, something went wrong on my side. Please try again." + self._told(True))
 
     def _handle(self, user_text, cancel):
         if self.messages and len(json.dumps(self.messages)) > MAX_HISTORY_CHARS:
@@ -164,7 +173,7 @@ class Agent(object):
                 return
             except llm.ConfigError as e:
                 self._report("Configuration problem: %s" % e)
-                self.emit("error", "I am not set up correctly yet. Ahmed has been sent a message.")
+                self.emit("error", "I am not set up correctly yet." + self._told())
                 return
 
             self.messages.append({"role": "assistant", "content": response.content})
@@ -216,14 +225,14 @@ class Agent(object):
         body = e.body.lower()
         if e.status in (401, 403):
             self._report("API key rejected (HTTP %s)" % e.status, e.body[:1000])
-            self.emit("error", "There is a problem with my account settings. Ahmed has been sent a message.")
+            self.emit("error", "There is a problem with my account settings." + self._told())
         elif "credit" in body or "billing" in body or "balance" in body or e.status == 402:
             self._report("Out of API credit (HTTP %s)" % e.status, e.body[:1000])
-            self.emit("error", "My account has run out of credit. Ahmed has been sent a message to top it up.")
+            self.emit("error", "My account has run out of credit, so Ahmed needs to top it up." + self._told())
         elif e.status in net.RETRY_STATUS:
             self.emit("error", "The AI service is very busy right now. Please try again in a few minutes.")
             if e.status >= 500:
                 log.warning("Service busy: %s", e)
         else:
             self._report("API error HTTP %s" % e.status, e.body[:2000])
-            self.emit("error", "Sorry, something went wrong. Please try again. (Ahmed has been sent a report.)")
+            self.emit("error", "Sorry, something went wrong. Please try again." + self._told(True))

@@ -85,7 +85,9 @@ def _decode_console(data):
         return ""
     if data.startswith(b"\xff\xfe"):
         return data[2:].decode("utf-16-le", "replace")
-    if len(data) >= 4 and data[1::2].count(0) > len(data) // 4:
+    if b"\x00" in data:
+        # OEM/ANSI console text never contains NUL bytes, so this is UTF-16 from `cmd /u`.  (Counting
+        # zero bytes is not enough: Arabic text in UTF-16 has none in the high bytes.)
         return data[: len(data) // 2 * 2].decode("utf-16-le", "replace")
     if data.startswith(b"\xef\xbb\xbf"):
         return data[3:].decode("utf-8", "replace")
@@ -95,12 +97,22 @@ def _decode_console(data):
         return data.decode(winapi.oem_encoding(), "replace")
 
 
-def _read(path, limit=400 * 1024):
+def _read_text(path, decode, limit=400 * 1024):
+    """Read a captured output file.  If it is huge, keep the beginning AND the end (errors are usually last)."""
     try:
         with open(path, "rb") as f:
-            return f.read(limit)
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(0)
+            if size <= limit:
+                return decode(f.read())
+            half = limit // 2 // 2 * 2  # keep an even number of bytes for UTF-16 output
+            head = f.read(half)
+            f.seek(size - half)
+            tail = f.read()
+        return "%s\n[... %d bytes of output skipped ...]\n%s" % (decode(head), size - 2 * half, decode(tail))
     except OSError:
-        return b""
+        return ""
 
 
 def _remove(*files):
@@ -139,14 +151,16 @@ def _wrapper(code_path, out_path):
         "$ErrorActionPreference = 'Continue'",
         "$ProgressPreference = 'SilentlyContinue'",
         "$__out = " + _ps_quote(out_path),
-        "$__text = ''",
+        # Collect each output item as it arrives, so output printed before an error is kept.
+        "$__items = New-Object System.Collections.ArrayList",
         "try {",
         "  $__code = [System.IO.File]::ReadAllText(" + _ps_quote(code_path) + ", [System.Text.Encoding]::UTF8)",
         "  $__sb = [ScriptBlock]::Create($__code)",
-        "  $__text = (& $__sb 2>&1 | Out-String -Width 220)",
+        "  & $__sb 2>&1 | ForEach-Object { [void]$__items.Add($_) }",
         "} catch {",
-        "  $__text = $__text + \"`nERROR: \" + ($_ | Out-String)",
+        "  [void]$__items.Add('ERROR: ' + ($_ | Out-String))",
         "}",
+        "$__text = ($__items | Out-String -Width 220)",
         "[System.IO.File]::WriteAllText($__out, [string]$__text, (New-Object System.Text.UTF8Encoding $false))",
         "if ($LASTEXITCODE) { exit $LASTEXITCODE }",
     ])
@@ -183,8 +197,8 @@ def _wait(proc, timeout, cancel):
         time.sleep(0.2)
 
 
-def _run(args, timeout, cancel, cwd=None):
-    """Run a process with output to temp files.  Returns (exit_code, stdout+stderr bytes, state)."""
+def _run(args, timeout, cancel, decode, cwd=None):
+    """Run a process with output to temp files.  Returns (exit_code, stdout+stderr text, state)."""
     paths.ensure_dirs()
     token = uuid.uuid4().hex
     out_file = os.path.join(paths.TEMP_DIR, token + ".stdout")
@@ -204,7 +218,11 @@ def _run(args, timeout, cancel, cwd=None):
                     proc.wait(10)
                 except subprocess.TimeoutExpired:
                     pass
-        return proc.returncode, _read(out_file) + _read(err_file), state
+        text = _read_text(out_file, decode)
+        err_text = _read_text(err_file, decode)
+        if err_text.strip():
+            text = (text.rstrip() + "\n" + err_text).strip()
+        return proc.returncode, text, state
     finally:
         _remove(out_file, err_file)
 
@@ -220,9 +238,9 @@ def run_powershell(code, timeout=120, cancel=None):
         encoded = base64.b64encode(_wrapper(code_path, out_path).encode("utf-16-le")).decode("ascii")
         args = [_powershell_exe(), "-NoLogo", "-NoProfile", "-NonInteractive",
                 "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded]
-        exit_code, console, state = _run(args, timeout, cancel)
-        output = _read(out_path).decode("utf-8", "replace")
-        extra = _decode_console(console).strip()
+        exit_code, console, state = _run(args, timeout, cancel, _decode_console)
+        output = _read_text(out_path, lambda b: b.decode("utf-8-sig", "replace"))
+        extra = console.strip()
         if extra:
             output = (output + "\n" + extra).strip()
         return CommandResult(exit_code, output, state == "timeout", state == "cancelled")
@@ -234,15 +252,16 @@ def run_cmd(command, timeout=120, cancel=None):
     # /d skips AutoRun, /u makes built-in commands write UTF-16, /s /c keeps quotes intact.
     comspec = os.environ.get("ComSpec") or "cmd.exe"
     args = '"%s" /d /u /s /c "%s"' % (comspec, command)
-    exit_code, console, state = _run(args, timeout, cancel)
-    return CommandResult(exit_code, _decode_console(console), state == "timeout", state == "cancelled")
+    exit_code, text, state = _run(args, timeout, cancel, _decode_console)
+    return CommandResult(exit_code, text, state == "timeout", state == "cancelled")
 
 
 def run(shell, command, timeout=120, cancel=None):
     if not winapi.IS_WINDOWS:
         # Development fallback so the rest of the app can be exercised on Linux.
-        exit_code, console, state = _run(["/bin/sh", "-c", command], timeout, cancel)
-        return CommandResult(exit_code, console.decode("utf-8", "replace"), state == "timeout", state == "cancelled")
+        exit_code, text, state = _run(["/bin/sh", "-c", command], timeout, cancel,
+                                      lambda b: b.decode("utf-8", "replace"))
+        return CommandResult(exit_code, text, state == "timeout", state == "cancelled")
     if shell == "cmd":
         return run_cmd(command, timeout, cancel)
     return run_powershell(command, timeout, cancel)

@@ -12,6 +12,7 @@ import json
 import logging
 import socket
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -100,13 +101,41 @@ def _retry_after_seconds(value, default):
         return default
 
 
-def with_retries(func, cancel=None, delays=RETRY_DELAYS):
+def _cancellable(func, cancel):
+    """Run func() but stop waiting as soon as `cancel` is set (the Stop button).
+
+    A blocking HTTPS request cannot be interrupted, so it runs in a helper thread; if the user presses
+    Stop we simply stop waiting for it and its late answer is thrown away.
+    """
+    if cancel is None:
+        return func()
+    box = {}
+
+    def work():
+        try:
+            box["result"] = func()
+        except BaseException as e:  # handed over to the waiting thread
+            box["error"] = e
+    worker = threading.Thread(target=work, name="http", daemon=True)
+    worker.start()
+    while worker.is_alive():
+        worker.join(0.2)
+        if cancel.is_set():
+            raise Cancelled()
+    if "error" in box:
+        raise box["error"]
+    return box["result"]
+
+
+def with_retries(func, cancel=None, delays=None):
+    if delays is None:
+        delays = RETRY_DELAYS
     attempt = 0
     while True:
         if cancel is not None and cancel.is_set():
             raise Cancelled()
         try:
-            return func()
+            return _cancellable(func, cancel)
         except HttpError as e:
             if e.status not in RETRY_STATUS or attempt >= len(delays):
                 raise
@@ -121,7 +150,7 @@ def with_retries(func, cancel=None, delays=RETRY_DELAYS):
         attempt += 1
 
 
-def post_json(url, payload, headers=None, timeout=300, cancel=None, delays=RETRY_DELAYS):
+def post_json(url, payload, headers=None, timeout=300, cancel=None, delays=None):
     data = json.dumps(payload).encode("utf-8")
     all_headers = {"Content-Type": "application/json"}
     all_headers.update(headers or {})

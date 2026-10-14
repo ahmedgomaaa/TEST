@@ -9,6 +9,7 @@ import queue
 import threading
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 import traceback
 from tkinter import scrolledtext
 
@@ -27,6 +28,14 @@ GREEN = "#2E7D32"
 FONT = "Segoe UI"
 
 
+def _center(win, root):
+    """Place a dialog in the middle of the main window."""
+    win.update_idletasks()
+    x = root.winfo_rootx() + max(0, (root.winfo_width() - win.winfo_reqwidth()) // 2)
+    y = root.winfo_rooty() + max(0, (root.winfo_height() - win.winfo_reqheight()) // 3)
+    win.geometry("+%d+%d" % (x, y))
+
+
 class BigDialog(object):
     """A modal Yes/No (or OK) question with very large buttons."""
 
@@ -38,10 +47,21 @@ class BigDialog(object):
         win.transient(root)
         win.resizable(False, False)
         win.protocol("WM_DELETE_WINDOW", self._no)
-        tk.Label(win, text=textutil.for_tk(question), font=(FONT, size + 3, "bold"), bg=BG, wraplength=640,
-                 justify="left").pack(padx=24, pady=(22, 10), anchor="w")
+        qfont = (FONT, size + 3, "bold")
+        question = textutil.for_tk(question)
+        if textutil.is_rtl(question):
+            measure = tkfont.Font(root=root, font=qfont).measure
+            tk.Label(win, text="\n".join(textutil.rtl_visual_lines(question, 620, measure)), font=qfont, bg=BG,
+                     justify="right").pack(padx=24, pady=(22, 10), anchor="e")
+        else:
+            tk.Label(win, text=question, font=qfont, bg=BG, wraplength=640,
+                     justify="left").pack(padx=24, pady=(22, 10), anchor="w")
         if details:
-            shown = [textutil.for_tk(d) for d in details[:12]]
+            shown = []
+            dfont = tkfont.Font(root=root, font=(FONT, size - 3))
+            for d in details[:12]:
+                d = textutil.for_tk(d)
+                shown.extend(textutil.rtl_visual_lines(d, 620, dfont.measure) if textutil.is_rtl(d) else [d])
             if len(details) > 12:
                 shown.append("... and %d more" % (len(details) - 12))
             tk.Label(win, text="\n".join(shown), font=(FONT, size - 3), bg=BG, fg="#444444", wraplength=640,
@@ -53,10 +73,7 @@ class BigDialog(object):
         if no:
             tk.Button(row, text=no, font=(FONT, size + 2, "bold"), padx=26, pady=10,
                       command=self._no).pack(side="left", padx=(16, 0))
-        win.update_idletasks()
-        x = root.winfo_rootx() + max(0, (root.winfo_width() - win.winfo_width()) // 2)
-        y = root.winfo_rooty() + max(0, (root.winfo_height() - win.winfo_height()) // 3)
-        win.geometry("+%d+%d" % (x, y))
+        _center(win, root)
         win.lift()
         win.focus_force()
         try:
@@ -159,9 +176,12 @@ class App(object):
         self.chat.tag_configure("who_assistant", font=(FONT, s, "bold"), foreground=GREEN, spacing1=14)
         self.chat.tag_configure("user", foreground=USER_COLOR, lmargin1=8, lmargin2=8, spacing3=4)
         self.chat.tag_configure("assistant", foreground=ASSISTANT_COLOR, lmargin1=8, lmargin2=8, spacing3=4)
-        self.chat.tag_configure("notice", foreground=NOTICE_COLOR, font=(FONT, s - 1, "italic"), lmargin1=8)
-        self.chat.tag_configure("activity", foreground=NOTICE_COLOR, font=(FONT, s - 2, "italic"), lmargin1=8)
-        self.chat.tag_configure("error", foreground=ERROR_COLOR, font=(FONT, s, "bold"), lmargin1=8, spacing1=8)
+        self.chat.tag_configure("notice", foreground=NOTICE_COLOR, font=(FONT, s - 1, "italic"), lmargin1=8,
+                                lmargin2=8)
+        self.chat.tag_configure("activity", foreground=NOTICE_COLOR, font=(FONT, s - 2, "italic"), lmargin1=8,
+                                lmargin2=8)
+        self.chat.tag_configure("error", foreground=ERROR_COLOR, font=(FONT, s, "bold"), lmargin1=8, lmargin2=8,
+                                spacing1=8)
         self.chat.tag_configure("rtl", justify="right", rmargin=8)
 
     def _zoom(self, delta):
@@ -179,11 +199,27 @@ class App(object):
             if who:
                 self.chat.insert("end", "\n%s\n" % who, "who_" + tag)
             for paragraph in text.split("\n"):
-                tags = (tag, "rtl") if textutil.is_rtl(paragraph) else (tag,)
-                self.chat.insert("end", paragraph + "\n", tags)
+                if textutil.is_rtl(paragraph):
+                    for line in self._rtl_lines(paragraph, tag):
+                        self.chat.insert("end", line + "\n", (tag, "rtl"))
+                else:
+                    self.chat.insert("end", paragraph + "\n", (tag,))
         finally:
             self.chat.configure(state="disabled")
         self.chat.see("end")
+
+    def _rtl_lines(self, paragraph, tag):
+        if not self.cfg.get("arabic_word_order_fix", True):
+            return [paragraph]
+        try:
+            font = tkfont.Font(root=self.root, font=self.chat.tag_cget(tag, "font") or self.chat.cget("font"))
+            width = max(200, self.chat.winfo_width() - 60)
+            if width <= 200:
+                width = 800  # window not drawn yet
+            return textutil.rtl_visual_lines(paragraph, width, font.measure)
+        except Exception:
+            log.exception("RTL layout failed")
+            return [paragraph]
 
     def _show_image(self, path):
         try:
@@ -211,8 +247,9 @@ class App(object):
                     "For example: \"Tidy up my desktop\", \"Find my photos from last summer\" or \"What is "
                     "the weather like in spring in Cairo?\"", "assistant", self.cfg["assistant_name"])
         if problems or self.agent is None:
-            self._write("I am not completely set up yet, so I may not be able to answer. Ahmed has been "
-                        "sent a message about it.", "error")
+            told = ("Ahmed has been sent a message about it." if self.reporter.configured()
+                    else "Please ask Ahmed to finish setting me up.")
+            self._write("I am not completely set up yet, so I may not be able to answer. " + told, "error")
 
     # ------------------------------------------------------------------ input
 
@@ -307,7 +344,6 @@ class App(object):
                  font=(FONT, s + 1, "bold"), bg=BG, wraplength=560, justify="left").pack(padx=20, pady=(18, 8))
         box = tk.Text(win, height=5, width=50, wrap="word", font=(FONT, s))
         box.pack(padx=20, fill="both", expand=True)
-        box.focus_set()
 
         def send():
             note = box.get("1.0", "end").strip()
@@ -323,6 +359,8 @@ class App(object):
         tk.Button(row, text="Send to Ahmed", font=(FONT, s + 2, "bold"), bg=GREEN, fg="white", padx=20,
                   command=send).pack(side="left")
         tk.Button(row, text="Cancel", font=(FONT, s + 2), padx=20, command=win.destroy).pack(side="left", padx=12)
+        _center(win, self.root)
+        box.focus_set()
         try:
             win.grab_set()
         except tk.TclError:

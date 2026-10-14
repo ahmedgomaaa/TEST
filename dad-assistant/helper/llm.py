@@ -15,7 +15,6 @@ from . import net
 
 log = logging.getLogger("assistant.llm")
 
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 MAX_TOKENS = 16000
 REQUEST_TIMEOUT = 300
 
@@ -43,6 +42,7 @@ class AnthropicLLM(object):
         self.model = settings.get("model") or "claude-opus-5-5"
         self.effort = settings.get("effort") or None
         self.use_fallbacks = bool(settings.get("use_fallbacks", True))
+        self.url = (settings.get("base_url") or "https://api.anthropic.com").rstrip("/") + "/v1/messages"
         if not self.api_key:
             raise ConfigError("No Anthropic API key in config.json")
 
@@ -73,7 +73,7 @@ class AnthropicLLM(object):
         for _ in range(3):
             try:
                 data = net.post_json(
-                    ANTHROPIC_URL, self._payload(system, tools, messages), self._headers(),
+                    self.url, self._payload(system, tools, messages), self._headers(),
                     timeout=REQUEST_TIMEOUT, cancel=cancel,
                 )
                 break

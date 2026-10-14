@@ -95,6 +95,11 @@ class TextTests(unittest.TestCase):
         self.assertTrue(textutil.is_rtl("مرحبا بك"))
         self.assertFalse(textutil.is_rtl("Hello"))
 
+    def test_rtl_layout_reverses_words_per_line(self):
+        lines = textutil.rtl_visual_lines("one two three four five", 9, len)
+        self.assertEqual(lines, ["two one", "three", "five four"])
+        self.assertEqual(textutil.rtl_visual_lines("", 100, len), [""])
+
     def test_markdown(self):
         self.assertEqual(textutil.strip_markdown("## Title\n**bold** and `code`"), "Title\nbold and code")
 
@@ -123,6 +128,8 @@ class ShellTests(unittest.TestCase):
     def test_decode(self):
         self.assertEqual(shell._decode_console("Folder مرحبا".encode("utf-16-le")), "Folder مرحبا")
         self.assertEqual(shell._decode_console(b"plain"), "plain")
+        arabic_only = "\u0635\u0648\u0631.jpg\r\n"
+        self.assertEqual(shell._decode_console(arabic_only.encode("utf-16-le")), arabic_only)
 
     def test_shorten(self):
         out = shell.shorten("x" * 20000, 1000)
@@ -267,6 +274,16 @@ class ToolTests(HomeDirTest):
         self.runner.run("undo_last_change", {})
         self.assertTrue(os.path.exists(a))
         self.assertFalse(os.path.exists(os.path.join(self.home, "Desktop", "New Folder")))
+
+    def test_move_into_new_folder_vs_rename(self):
+        a = self.write("Desktop/one.jpg")
+        b = self.write("Desktop/two.txt")
+        photos = os.path.join(self.home, "Desktop", "Photos")
+        self.runner.run("move_items", {"moves": [{"from": a, "to": photos}], "explanation": "x"})
+        self.assertTrue(os.path.isfile(os.path.join(photos, "one.jpg")))  # folder created, not a file named Photos
+        self.runner.run("move_items", {"moves": [{"from": b, "to": os.path.join(self.home, "Desktop", "renamed.txt")}],
+                                       "explanation": "x"})
+        self.assertTrue(os.path.isfile(os.path.join(self.home, "Desktop", "renamed.txt")))
 
     def test_user_says_no(self):
         a = self.write("Desktop/a.txt")

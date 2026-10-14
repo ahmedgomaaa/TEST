@@ -206,6 +206,17 @@ def oem_encoding():
     return "utf-8"
 
 
+def disable_crash_dialogs():
+    """No "pythonw.exe has stopped working" box: a crash should just end the process so the launcher
+    can restart it.  Child processes inherit this setting."""
+    if IS_WINDOWS:
+        try:
+            # SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
+            _kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000)
+        except Exception:
+            pass
+
+
 def single_instance(name):
     """Return a handle if we are the only instance, None if another one runs."""
     if not IS_WINDOWS:

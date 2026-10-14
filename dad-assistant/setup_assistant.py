@@ -123,7 +123,20 @@ def make_shortcut(cfg):
     icon = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "shell32.dll")
 
     def vbs_str(s):
-        return '"' + s.replace('"', '""') + '"'
+        """A VBScript string expression using only ASCII (non-ASCII characters become ChrW(n)),
+        so the script works no matter how cscript reads the file."""
+        parts, run = [], ""
+        for ch in s:
+            if ord(ch) < 128:
+                run += '""' if ch == '"' else ch
+            else:
+                if run:
+                    parts.append('"%s"' % run)
+                    run = ""
+                parts.append("ChrW(%d)" % ord(ch))
+        if run or not parts:
+            parts.append('"%s"' % run)
+        return " & ".join(parts)
 
     script = "\r\n".join([
         'Set sh = CreateObject("WScript.Shell")',
@@ -138,16 +151,22 @@ def make_shortcut(cfg):
     fd, vbs = tempfile.mkstemp(suffix=".vbs")
     os.close(fd)
     try:
-        with open(vbs, "w", encoding="utf-16") as f:  # UTF-16 with BOM so non-English paths work
+        with open(vbs, "w", encoding="ascii", newline="\r\n") as f:
             f.write(script)
         code = subprocess.call(["cscript", "//nologo", vbs])
+    except OSError as e:
+        code = str(e)
     finally:
         os.remove(vbs)
-    if code == 0 and os.path.exists(link):
+    if os.path.exists(link):
         say("Shortcut created: %s" % link)
         return True
-    say("PROBLEM: could not create the shortcut (cscript exit code %s)." % code)
-    return False
+    # Fallback: a small .pyw file on the desktop also starts the helper when double-clicked.
+    starter = os.path.join(_desktop(), "%s.pyw" % cfg["assistant_name"])
+    with open(starter, "w", encoding="utf-8") as f:
+        f.write("# Starts the helper.\nimport runpy\nrunpy.run_path(%r, run_name='__main__')\n" % launcher)
+    say("Could not create a normal shortcut (cscript: %s), so I put %s on the desktop instead." % (code, starter))
+    return True
 
 
 def main():

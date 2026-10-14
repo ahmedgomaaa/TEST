@@ -86,9 +86,66 @@ The log records his requests and the actions taken, so you can see what happened
 - **One copy at a time.** Opening it twice just says "already open".
 - **Conversation history stays valid.** It is append-only. Long conversations start fresh automatically to keep costs down, and a damaged conversation is reset and retried once.
 
+## Testing
+
+How to run the tests:
+
+- **Any OS:** `python -m unittest discover -s tests` with Python 3.8 or newer.
+- **PowerShell wrapper outside Windows:** set `PWSH=/path/to/pwsh` to run it against PowerShell 7.
+- **On Windows:** the same command also runs the Windows-only tests (`test_windows.py`, `test_launcher.py`).
+
+### What was verified on Windows 7 SP1 32-bit (Wine 9.0, Windows 7 mode, official Python 3.8.10 32-bit)
+
+All tests pass: 76 on Windows Python, 8 skipped because they need a real `powershell.exe`. On top of that, the real app was driven through its window with simulated mouse and keyboard.
+
+**The app itself**
+- **Launch:** `Start Assistant.pyw` under `pythonw.exe`, installed in a folder with an Arabic name and spaces, and a `config.json` saved with a Notepad-style BOM.
+- **Tidy-up conversation:** a full conversation against a local fake Claude API. Request → AI lists the desktop → big Yes/No question → files moved → reply shown. Emoji are stripped safely and Markdown is cleaned.
+- **Stop:** works immediately while the AI is still thinking, and the late answer is discarded.
+- **Undo button:** puts files back and removes folders it created.
+- **"Ask Ahmed for help":** delivered over TLS to a fake Gmail SMTP server. The log is attached as UTF-8, and the API key and app password are redacted.
+
+**Crashes and restarts**
+- **Crash recovery:** a native access-violation crash makes the launcher restart the app.
+- **Repeated failures:** after 3 failures it shows a friendly message and emails "cannot start".
+- **Double start:** a second launch says "already open".
+- **Clean close:** Alt+F4 closes normally and nothing is left running.
+- **Crash email on restart:** the next start emails "closed unexpectedly".
+
+**Windows parts**
+- **Recycle Bin:** the `SHFileOperationW` structure has the correct 32-bit layout (30 bytes), and files and folders with Arabic names are recycled.
+- **cmd.exe:** Arabic file names come back intact, quoting and spaces work, and exit codes are kept.
+- **Large output:** 20,000 lines produce no deadlock, and both the start and the end are kept.
+- **Hung commands:** they are killed, `set /p` doesn't hang, and Stop works.
+- **pythonw:** runs fine with no console.
+- **SETUP.bat:** runs under `cmd.exe`, finds Python through the `py` launcher, and creates the config. It creates the desktop shortcut, or a `Helper.pyw` starter if shortcut creation fails; that starter works by double-click.
+
+**HTTPS and email**
+- Python 3.8.10's own OpenSSL 1.1.1k handles TLS.
+- An untrusted certificate is refused with a "check the date and time" message.
+- Retries on 429 errors, plus clear messages for a bad key, no credit, and no internet.
+
+### Bugs these tests found, all fixed
+
+- Moving files "to" a folder that didn't exist yet renamed the first file to the folder's name.
+- Command output over 400 KB lost its end, which is where results and errors usually are.
+- cmd output that was mostly Arabic came out garbled.
+- Stop didn't work while waiting for the AI, and the late answer still appeared.
+- PowerShell output printed before an error was lost.
+- A native crash could show Windows' "stopped working" box, and Wine reported exit code 0, so the app wasn't restarted.
+- Arabic was garbled in the emailed log.
+- Arabic sentences showed in reverse word order. Tk 8.6 draws each word left to right, so the app now lays out right-to-left lines itself.
+- Main folders weren't protected when the profile path and Windows' reported folder differ.
+
+### Not verified, so check on the real laptop
+
+- **PowerShell 2.0:** Wine has no real PowerShell. The wrapper was checked against PowerShell 7 and uses only PowerShell 2.0 constructs.
+- **Arabic word order on real Windows:** Wine showed the problem described above. If Arabic looks reversed on the laptop, set `"arabic_word_order_fix": false` in `config.json`. Typing Arabic in the input box may also show words in reverse order while typing; what is sent is correct.
+- **Real servers:** the live Claude API and Gmail weren't reachable from the test environment. `SETUP.bat` tests both on the laptop.
+- **Python installer and Windows updates:** the KB2533623 requirement can't be emulated.
+
 ## For developers
 
-- Run the tests with Python 3.8 or newer: `python -m unittest discover -s tests`. They run on Linux; Windows-only parts have fallbacks.
 - Code layout:
 
 | File | What it does |
@@ -98,9 +155,8 @@ The log records his requests and the actions taken, so you can see what happened
 | `helper/tools.py` | The tools and safety rules. |
 | `helper/shell.py` | Runs PowerShell 2.0 and cmd commands. |
 | `helper/llm.py` | Anthropic and OpenAI-compatible HTTP clients. |
-| `helper/net.py` | HTTPS and retries. |
+| `helper/net.py` | HTTPS, retries and Stop. |
 | `helper/report.py` | E-mail reports. |
-| `helper/winapi.py` | ctypes calls: Recycle Bin, known folders, mutex. |
+| `helper/winapi.py` | ctypes calls: Recycle Bin, known folders, mutex, crash dialogs. |
 
-- Keep everything **Python 3.8 compatible** and **standard library only**.
-- **Not yet tested on a real Windows 7 machine.** The logic, tests and the window were tested on Linux, but Windows-specific parts (Recycle Bin call, shortcut creation, PowerShell 2.0, Arabic text shaping in Tk on Windows) need a first run on the laptop. Check `data/logs/assistant.log` after the first session.
+- Keep everything **Python 3.8 compatible**, **standard library only**, and the source files ASCII-only.

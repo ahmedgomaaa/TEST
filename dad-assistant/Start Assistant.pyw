@@ -11,11 +11,12 @@ import time
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, APP_DIR)
 
-from helper import logs, winapi  # noqa: E402
+from helper import logs, paths, winapi  # noqa: E402
 
 
 def main():
     logs.setup()
+    winapi.disable_crash_dialogs()
     import logging
     log = logging.getLogger("assistant.launcher")
     if not winapi.single_instance("HomeAssistantLauncher"):
@@ -30,7 +31,13 @@ def main():
         except OSError as e:
             log.critical("Could not start the app: %s", e)
             code = -1
-        if code == 0:
+        # The app deletes its "running" marker when it closes normally.  Do not trust the exit code
+        # alone: some crashes end with code 0.
+        try:
+            still_marked = os.path.getmtime(paths.RUNNING_FLAG) >= started - 2
+        except OSError:
+            still_marked = False
+        if code == 0 and not still_marked:
             return
         log.error("App exited with code %s after %.0f seconds; restarting", code, time.time() - started)
         now = time.time()
