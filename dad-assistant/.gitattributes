@@ -1,0 +1,4 @@
+# Windows 7 Notepad and cmd.exe need CRLF line endings.
+*.bat eol=crlf
+*.json eol=crlf
+*.md eol=crlf

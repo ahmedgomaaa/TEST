@@ -1,0 +1,5 @@
+# Secrets and per-laptop data: never commit these.
+config.json
+data/
+__pycache__/
+*.pyc

@@ -1,0 +1,48 @@
+{
+  "_comment": "Copy of the settings. SETUP.bat copies this to config.json. Fill in the keys below. Never share config.json.",
+
+  "assistant_name": "Helper",
+  "user_name": "",
+  "font_size": 15,
+
+  "_provider_help": "\"anthropic\" (Claude, recommended) or \"openai_compatible\" (DeepSeek, OpenRouter, ...)",
+  "provider": "anthropic",
+
+  "anthropic": {
+    "api_key": "",
+    "model": "claude-opus-5-5",
+    "effort": "medium",
+    "use_fallbacks": true
+  },
+
+  "openai_compatible": {
+    "api_key": "",
+    "base_url": "https://api.deepseek.com/v1",
+    "model": "deepseek-chat"
+  },
+
+  "_images_help": "Optional. An OpenAI API key enables 'make me a picture of ...'.",
+  "images": {
+    "api_key": "",
+    "model": "gpt-image-1",
+    "size": "1024x1024"
+  },
+
+  "_email_help": "Gmail: smtp_username is the Gmail address that SENDS, smtp_app_password is a 16-letter App Password (Google Account > Security > 2-Step Verification > App passwords). send_to is where reports go.",
+  "email_reports": {
+    "enabled": true,
+    "send_to": "",
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 465,
+    "smtp_username": "",
+    "smtp_app_password": "",
+    "send_on_errors": true
+  },
+
+  "safety": {
+    "confirm_changes": true,
+    "command_timeout_seconds": 120
+  },
+
+  "max_steps_per_request": 30
+}
